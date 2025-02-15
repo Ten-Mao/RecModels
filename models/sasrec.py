@@ -18,7 +18,8 @@ class SASRec(nn.Module):
         n_heads, 
         attn_dropout, 
         inner_dim, 
-        ffn_dropout, 
+        ffn_activation,
+        ffn_dropout,
         eps, 
         num_layers,
 
@@ -36,6 +37,7 @@ class SASRec(nn.Module):
         self.attn_dropout = attn_dropout
         self.inner_dim = inner_dim
         self.ffn_dropout = ffn_dropout
+        self.ffn_activation = ffn_activation
         self.eps = eps
         self.num_layers = num_layers
 
@@ -43,7 +45,7 @@ class SASRec(nn.Module):
         self.pad_idx = pad_idx
 
         # Embedding Layer
-        self.item_emb = nn.Embedding(n_items, d_model, padding_idx=pad_idx)
+        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
         self.pos_emb = nn.Embedding(max_len, d_model)
 
         # Transformer Layer
@@ -58,10 +60,9 @@ class SASRec(nn.Module):
             self.attn_norm.append(LayerNorm(d_model, eps=eps))
             self.attn.append(MultiHeadAttention(d_model, n_heads, attn_dropout, causal=True, q_mask=True))
             self.ffn_norm.append(LayerNorm(d_model, eps=eps))
-            self.ffn.append(FeedForward(d_model, inner_dim, ffn_dropout))
+            self.ffn.append(FeedForward(d_model, inner_dim, ffn_dropout, ffn_activation))
 
         self.final_norm = LayerNorm(d_model, eps=eps)        
-
 
     def encode_seqs(self, x):
         key_padding_mask = query_padding_mask = (x != self.pad_idx)
@@ -104,7 +105,8 @@ class SASRec(nn.Module):
         return torch.stack(res, dim=0)
     
     def forward(self, x, next_items):
-        target_indices = (x == self.pad_idx).sum(dim=-1) - 1
+        # x: [batch_size, seq_len], next_items: [batch_size]
+        target_indices = (x != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(x)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:].t()
