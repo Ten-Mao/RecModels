@@ -25,12 +25,13 @@ class Gru4Rec(nn.Module):
         self.num_layers = num_layers
         self.dropout = dropout
 
-        self.item_emb = nn.Embedding(n_items + 1, d_model) # zero for padding
+        self.pad_idx = pad_idx
+        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
         self.emb_dropout = nn.Dropout(dropout)
         self.gru = nn.GRU(d_model, inner_dim, num_layers, dropout=dropout, batch_first=True)
         self.fc = nn.Linear(inner_dim, d_model)
 
-        self.pad_idx = pad_idx
+
         self.loss_type = loss_type
         self.loss_func = self.get_loss_func()
 
