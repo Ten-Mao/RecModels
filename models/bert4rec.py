@@ -1,3 +1,4 @@
+from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,6 +7,7 @@ import numpy as np
 from layers.feedforward import FeedForward
 from layers.layernorm import LayerNorm
 from layers.multiheadattention import MultiHeadAttention
+from util.loss import BPRLoss, CELoss
 
 class Bert4Rec(nn.Module):
     def __init__(
@@ -23,7 +25,8 @@ class Bert4Rec(nn.Module):
         eps, 
         num_layers,
 
-        pad_idx=0
+        pad_idx=0,
+        loss_type: Literal["bpr", "ce"] = "ce"
     ):
         super(Bert4Rec, self).__init__()
         # Embedding Layer Parameters
@@ -68,16 +71,27 @@ class Bert4Rec(nn.Module):
         self.final_norm1 = LayerNorm(d_model, eps=eps)        
         self.final_norm2 = LayerNorm(d_model, eps=eps)      
 
-    def encode_seqs(self, x):
-        key_padding_mask = (x != self.pad_idx)
+        self.loss_type = loss_type
+        self.loss_func = self.get_loss_func()
+
+    def get_loss_func(self):
+        if self.loss_type == "bpr":
+            return BPRLoss()
+        elif self.loss_type == "ce":
+            return CELoss()
+        else:
+            raise ValueError("Invalid loss type.")    
+        
+    def encode_seqs(self, his_seqs):
+        key_padding_mask = (his_seqs != self.pad_idx)
 
         # Embedding Layer
-        item_emb = self.item_emb(x)
+        item_emb = self.item_emb(his_seqs)
         item_emb = item_emb * np.sqrt(self.d_model)
         pos = (
-            torch.arange(x.shape[-1])
+            torch.arange(his_seqs.shape[-1])
             .unsqueeze(0)
-            .repeat(x.shape[0], 1)
+            .repeat(his_seqs.shape[0], 1)
             .to(item_emb.device)
         )
         pos_emb = self.pos_emb(pos)
@@ -109,32 +123,53 @@ class Bert4Rec(nn.Module):
             res.append(his_emb[i, target_indices[i], :])
         return torch.stack(res, dim=0)
     
-    def inject(self, x):
-        tgt_pad = torch.full((x.shape[0], 1), self.pad_idx, dtype=torch.long, device=x.device)
-        x_pad = torch.cat([x, tgt_pad], dim=-1)
-        target_indices = (x != self.pad_idx).sum(dim=-1)
-        x_pad[torch.arange(x.shape[0]), target_indices] = self.mask_idx 
+    def inject(self, his_seqs):
+        tgt_pad = torch.full((his_seqs.shape[0], 1), self.pad_idx, dtype=torch.long, device=his_seqs.device)
+        x_pad = torch.cat([his_seqs, tgt_pad], dim=-1)
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
+        x_pad[torch.arange(his_seqs.shape[0]), target_indices] = self.mask_idx 
         return x_pad, target_indices
 
-    def forward(self, x, mask_indices, tgt_items):
-        # x: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], tgt_items: [batch_size, max_mask_len]
+    def forward(self, his_seqs, mask_indices, tgt_items, neg_items=None):
+        # his_seqs: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], tgt_items: [batch_size, max_mask_len], neg_items: [batch_size, max_mask_len]
         move_pad_mask_indices = torch.max(mask_indices, torch.zeros_like(mask_indices))
-        mask_onehot = F.one_hot(move_pad_mask_indices.reshape(-1), num_classes=x.shape[1])
+        mask_onehot = F.one_hot(move_pad_mask_indices.reshape(-1), num_classes=his_seqs.shape[1])
         mask_onehot = mask_onehot.reshape(mask_indices.shape[0], mask_indices.shape[1], -1)
-        his_emb = self.encode_seqs(x)
+        his_emb = self.encode_seqs(his_seqs)
         # mask_onehot: [batch_size, max_mask_len, seq_len] -> [batch_size, max_mask_len, d_model]
         pred_emb = mask_onehot @ his_emb 
-        scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]
-        loss = F.cross_entropy(scores, tgt_items - 1, ignore_index=self.pad_idx - 1)
+
+        if self.loss_type == "bpr":
+            assert neg_items is not None
+            pos_emb = self.item_emb(tgt_items)
+            neg_emb = self.item_emb(neg_items)
+            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1)
+            neg_scores = torch.sum(pred_emb * neg_emb, dim=-1)
+            mask = (tgt_items != self.pad_idx) & (neg_items != self.pad_idx)
+            loss = self.loss_func(pos_scores, neg_scores, mask=mask)
+        elif self.loss_type == "ce":
+            scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]
+            loss = self.loss_func(scores, tgt_items - 1, ignore_index=self.pad_idx)
+        else:
+            raise ValueError("Invalid loss type.")
 
         return loss
     
-    def inference(self, x, topk):
-        # x: [batch_size, seq_len]
-        x, target_indices = self.inject(x)
-        his_emb = self.encode_seqs(x)
+    def inference(self, his_seqs, topk):
+        # his_seqs: [batch_size, seq_len]
+        his_seqs, target_indices = self.inject(his_seqs)
+        his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:-1].t() # [batch_size, n_items]
         _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
         return indices + 1
+    
+    def predict(self, his_seqs, test_items):
+        # his_seqs: [batch_size, seq_len], test_items: [batch_size]
+        his_seqs, target_indices = self.inject(his_seqs)
+        his_emb = self.encode_seqs(his_seqs)
+        target_emb = self.extract(his_emb, target_indices)
+        test_emb = self.item_emb(test_items)
+        scores = torch.sum(target_emb * test_emb, dim=-1)
+        return scores
 

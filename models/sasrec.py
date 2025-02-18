@@ -1,3 +1,4 @@
+from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,6 +7,7 @@ import numpy as np
 from layers.feedforward import FeedForward
 from layers.layernorm import LayerNorm
 from layers.multiheadattention import MultiHeadAttention
+from util.loss import BPRLoss, CELoss
 
 class SASRec(nn.Module):
     def __init__(
@@ -23,7 +25,8 @@ class SASRec(nn.Module):
         eps, 
         num_layers,
 
-        pad_idx=0
+        pad_idx=0,
+        loss_type: Literal["bpr", "ce"] = "ce"
     ):
         super(SASRec, self).__init__()
         # Embedding Layer Parameters
@@ -62,18 +65,29 @@ class SASRec(nn.Module):
             self.ffn_norm.append(LayerNorm(d_model, eps=eps))
             self.ffn.append(FeedForward(d_model, inner_dim, ffn_dropout, ffn_activation))
 
-        self.final_norm = LayerNorm(d_model, eps=eps)        
+        self.final_norm = LayerNorm(d_model, eps=eps)    
 
-    def encode_seqs(self, x):
-        key_padding_mask = query_padding_mask = (x != self.pad_idx)
+        self.loss_type = loss_type
+        self.loss_func = self.get_loss_func()
+
+    def get_loss_func(self):
+        if self.loss_type == "bpr":
+            return BPRLoss()
+        elif self.loss_type == "ce":
+            return CELoss()
+        else:
+            raise ValueError("Invalid loss type.")    
+
+    def encode_seqs(self, his_seqs):
+        key_padding_mask = query_padding_mask = (his_seqs != self.pad_idx)
 
         # Embedding Layer
-        item_emb = self.item_emb(x)
+        item_emb = self.item_emb(his_seqs)
         item_emb = item_emb * np.sqrt(self.d_model)
         pos = (
-            torch.arange(x.shape[-1])
+            torch.arange(his_seqs.shape[-1])
             .unsqueeze(0)
-            .repeat(x.shape[0], 1)
+            .repeat(his_seqs.shape[0], 1)
             .to(item_emb.device)
         )
         pos_emb = self.pos_emb(pos)
@@ -104,20 +118,39 @@ class SASRec(nn.Module):
             res.append(his_emb[i, target_indices[i], :])
         return torch.stack(res, dim=0)
     
-    def forward(self, x, next_items):
-        # x: [batch_size, seq_len], next_items: [batch_size]
-        target_indices = (x != self.pad_idx).sum(dim=-1) - 1
-        his_emb = self.encode_seqs(x)
+    def forward(self, his_seqs, next_items, neg_items=None):
+        # his_seqs: [batch_size, seq_len], next_items: [batch_size], neg_items: [batch_size]
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
+        his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
-        scores = target_emb @ self.item_emb.weight[1:].t()
-        loss = F.cross_entropy(scores, next_items - 1)
+
+        if self.loss_type == "bpr":
+            assert neg_items is not None
+            pos_emb = self.item_emb(next_items)
+            neg_emb = self.item_emb(neg_items)
+            pos_scores = torch.sum(target_emb * pos_emb, dim=-1)
+            neg_scores = torch.sum(target_emb * neg_emb, dim=-1)
+            loss = self.loss_func(pos_scores, neg_scores)
+        elif self.loss_type == "ce":
+            scores = target_emb @ self.item_emb.weight[1:].t()
+            loss = self.loss_func(scores, next_items - 1)
+        else:
+            raise ValueError("Invalid loss type.")
         return loss
     
-    def inference(self, x, topk):
-        target_indices = (x == self.pad_idx).sum(dim=-1) - 1
-        his_emb = self.encode_seqs(x)
+    def inference(self, his_seqs, topk):
+        target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
+        his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:].t()
         _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
         return indices + 1
+
+    def predict(self, his_seqs, test_items):
+        target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
+        his_emb = self.encode_seqs(his_seqs)
+        target_emb = self.extract(his_emb, target_indices)
+        test_emb = self.item_emb(test_items)
+        scores = torch.sum(target_emb * test_emb, dim=-1)
+        return scores
 
