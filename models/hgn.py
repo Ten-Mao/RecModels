@@ -79,9 +79,9 @@ class HGN(nn.Module):
             raise ValueError("Invalid pool type")
         return pooled_emb
 
-    def forward(self, his_seqs, user_seqs, next_items, neg_items=None):
-        # his_seqs: (batch_size, max_len)
-        # user_seqs: (batch_size)
+    def encode_seqs(self, his_seqs, user_seqs):
+        # his_seqs: (batch_size, max_len), user_seqs: (batch_size)
+
         # Item Embedding
         his_emb = self.item_emb(his_seqs)
         user_emb = self.user_emb(user_seqs)
@@ -99,6 +99,11 @@ class HGN(nn.Module):
 
         final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
 
+        return final_emb
+
+    def forward(self, his_seqs, user_seqs, next_items, neg_items=None):
+        # his_seqs: (batch_size, max_len), user_seqs: (batch_size), next_items: (batch_size), neg_items: (batch_size)
+        final_emb = self.encode_seqs(his_seqs, user_seqs)
         if self.loss_type == "bpr":
             assert neg_items is not None
             pos_emb = self.item_emb(next_items)
@@ -113,51 +118,16 @@ class HGN(nn.Module):
         return loss
     
     def inference(self, his_seqs, user_seqs, topk):
-        # his_seqs: (batch_size, max_len)
-        # user_seqs: (batch_size)
-        # Item Embedding
-        his_emb = self.item_emb(his_seqs)
-        user_emb = self.user_emb(user_seqs)
-
-        features_gated_emb = self.features_gating(his_emb, user_emb)
-        instance_gated_emb = self.instance_gating(features_gated_emb, user_emb)
-
-        # Pooling
-        instance_gated_emb = instance_gated_emb.permute(0, 2, 1)
-        padding_mask = (his_seqs != self.pad_idx).unsqueeze(-1)
-
-        pooled_emb = self.padding_pool(instance_gated_emb, padding_mask)
-    
-        his_embs = torch.where(padding_mask, his_emb, torch.tensor(0.).to(his_emb.device))
-
-        final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
-
+        # his_seqs: (batch_size, max_len), user_seqs: (batch_size)
+        final_emb = self.encode_seqs(his_seqs, user_seqs)
         scores = final_emb @ self.item_emb.weight[1:].t()
         _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
         return indices + 1
     
     def predict(self, his_seqs, user_seqs, test_items):
-        # his_seqs: (batch_size, max_len)
-        # user_seqs: (batch_size)
-        # Item Embedding
-        his_emb = self.item_emb(his_seqs)
-        user_emb = self.user_emb(user_seqs)
-
-        features_gated_emb = self.features_gating(his_emb, user_emb)
-        instance_gated_emb = self.instance_gating(features_gated_emb, user_emb)
-
-        # Pooling
-        instance_gated_emb = instance_gated_emb.permute(0, 2, 1)
-        padding_mask = (his_seqs != self.pad_idx).unsqueeze(-1)
-        
-        pooled_emb = self.padding_pool(instance_gated_emb, padding_mask)
-
-        his_embs = torch.where(padding_mask, his_emb, torch.tensor(0.).to(his_emb.device))
-
-        final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
-
+        # his_seqs: (batch_size, max_len), user_seqs: (batch_size), test_items: (batch_size)
+        final_emb = self.encode_seqs(his_seqs, user_seqs)
         test_emb = self.item_emb(test_items)
-
         scores = torch.sum(final_emb * test_emb, dim=-1)
 
         return scores

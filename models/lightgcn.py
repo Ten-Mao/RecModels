@@ -94,11 +94,12 @@ class LightGCN(nn.Module):
         return user_latent, item_latent
     
     def forward(self, user, pos_item, neg_item):
+        # user: (batch_size), pos_item: (batch_size), neg_item: (batch_size)
         user_latent, item_latent = self.encode_users_items()
 
         tgt_user_latent = user_latent[user]
-        pos_item_latent = item_latent[pos_item]
-        neg_item_latent = item_latent[neg_item]
+        pos_item_latent = item_latent[pos_item-1]
+        neg_item_latent = item_latent[neg_item-1]
 
         pos_scores = torch.sum(tgt_user_latent * pos_item_latent, dim=-1)
         neg_scores = torch.sum(tgt_user_latent * neg_item_latent, dim=-1)
@@ -107,11 +108,11 @@ class LightGCN(nn.Module):
         return loss
 
     def inference(self, user, topk):
+        # user: (batch_size)
         user_latent, item_latent = self.encode_users_items()
         user_latent = user_latent[user]
         scores = torch.matmul(user_latent, item_latent.t())
-
         _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices
+        return indices + 1
 
         
