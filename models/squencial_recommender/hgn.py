@@ -70,10 +70,10 @@ class HGN(nn.Module):
     def padding_pool(self, gated_emb, padding_mask):
         # gated_emb: (batch_size, d_model, max_len), padding_mask: (batch_size, max_len, 1)
         if self.pool_type == "max":
-            gated_emb = torch.where(padding_mask, gated_emb, torch.tensor(float('-inf')).to(gated_emb.device))
+            gated_emb = torch.where(padding_mask, gated_emb.permute(0, 2, 1), torch.tensor(-float("inf")).to(gated_emb.device))
             pooled_emb = gated_emb.max(dim=-1)
         elif self.pool_type == "avg":
-            gated_emb = torch.where(padding_mask, gated_emb, torch.tensor(0.).to(gated_emb.device))
+            gated_emb = torch.where(padding_mask, gated_emb.permute(0, 2, 1), torch.tensor(0.).to(gated_emb.device))
             pooled_emb = gated_emb.sum(dim=-1) / padding_mask.sum(dim=-1).unsqueeze(1)
         else:
             raise ValueError("Invalid pool type")

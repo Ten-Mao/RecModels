@@ -4,9 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from layers.feedforward import FeedForward
-from layers.layernorm import LayerNorm
-from layers.multiheadattention import MultiHeadAttention
+from layers.FeedForward import FeedForward
+from layers.LayerNorm import LayerNorm
+from layers.MultiHeadAttention import MultiHeadAttention
 from util.loss import BPRLoss, CELoss
 
 class SASRec(nn.Module):
