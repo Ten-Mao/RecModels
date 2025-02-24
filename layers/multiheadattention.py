@@ -30,18 +30,18 @@ class MultiHeadAttention(nn.Module):
             x = x.reshape(bsz, sqlen, self.n_heads, head_dim).permute(0, 2, 1, 3)
             return x
         
-        q = proj_and_split(q, self.q_proj)
-        k = proj_and_split(k, self.k_proj)
-        v = proj_and_split(v, self.v_proj)
+        Q = proj_and_split(q, self.q_proj)
+        K = proj_and_split(k, self.k_proj)
+        V = proj_and_split(v, self.v_proj)
 
-        attn_weights = torch.matmul(q, k.transpose(-2, -1)) / (q.shape[-1] ** 0.5)
+        attn_weights = torch.matmul(Q, K.transpose(-2, -1)) / (Q.shape[-1] ** 0.5)
 
         if key_padding_mask is not None:
             key_padding_mask = ~key_padding_mask[:, None, None, :].to(attn_weights.device)
             attn_weights = attn_weights.masked_fill(key_padding_mask, float('-inf'))
         
         if self.causal:
-            causal_mask = torch.triu(torch.ones(q.size(-2), k.size(-2)), diagonal=1).to(q.device)
+            causal_mask = torch.triu(torch.ones(q.shape[-2], k.shape[-2]), diagonal=1).to(q.device) > 0
             attn_weights = attn_weights.masked_fill(causal_mask, float('-inf'))
         
         attn_weights = F.softmax(attn_weights, dim=-1)
@@ -52,7 +52,7 @@ class MultiHeadAttention(nn.Module):
         
         attn_weights = self.dropout(attn_weights)
 
-        out = torch.matmul(attn_weights, v)
+        out = torch.matmul(attn_weights, V)
         out = out.permute(0, 2, 1, 3).reshape(q.shape[0], q.shape[1], -1)
 
         return out + q

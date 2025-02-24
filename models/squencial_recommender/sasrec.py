@@ -118,8 +118,13 @@ class SASRec(nn.Module):
             res.append(his_emb[i, target_indices[i], :])
         return torch.stack(res, dim=0)
     
-    def forward(self, his_seqs, next_items, neg_items=None):
+    def forward(self, interactions):
         # his_seqs: [batch_size, seq_len], next_items: [batch_size], neg_items: [batch_size]
+        his_seqs = interactions["his_seqs"]
+        next_items = interactions["next_items"].to(torch.long)
+        neg_items = interactions.get("neg_items", None)
+        if neg_items is not None:
+            neg_items = neg_items.to(torch.long)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
@@ -138,15 +143,20 @@ class SASRec(nn.Module):
             raise ValueError("Invalid loss type.")
         return loss
     
-    def inference(self, his_seqs, topk):
+    def inference(self, interactions):
+        # his_seqs: [batch_size, seq_len]
+        his_seqs = interactions["his_seqs"]
+
         target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:].t()
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
 
-    def predict(self, his_seqs, test_items):
+    def predict(self, interactions):
+        # his_seqs: [batch_size, seq_len], test_items: [batch_size]
+        his_seqs = interactions["his_seqs"]
+        test_items = interactions["test_items"].to(torch.long)
         target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)

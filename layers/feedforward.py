@@ -25,6 +25,7 @@ class FeedForward(nn.Module):
                 nn.init.constant_(module.bias, 0)
 
     def forward(self, x):
+        # x: (batch_size, seq_len, d_model)
         residual = x
         x = x.permute(0, 2, 1)
         x = self.dropout1(self.act(self.conv1(x)))
