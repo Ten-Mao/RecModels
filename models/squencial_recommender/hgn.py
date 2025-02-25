@@ -101,13 +101,20 @@ class HGN(nn.Module):
 
         return final_emb
 
-    def forward(self, his_seqs, user_seqs, next_items, neg_items=None):
-        # his_seqs: (batch_size, max_len), user_seqs: (batch_size), next_items: (batch_size), neg_items: (batch_size)
+    def forward(self, interactions):
+        # his_seqs: (batch_size, max_len), user_seqs: (batch_size), next_items: (batch_size), next_neg_items: (batch_size)
+        his_seqs = interactions["his_seqs"]
+        user_seqs = interactions["user_seqs"]
+        next_items = interactions["next_items"].to(torch.long)
+        next_neg_items = interactions.get("next_neg_items", None)
+        if next_neg_items is not None:
+            next_neg_items = next_neg_items.to(torch.long)
+
         final_emb = self.encode_seqs(his_seqs, user_seqs)
         if self.loss_type == "bpr":
-            assert neg_items is not None
+            assert next_neg_items is not None
             pos_emb = self.item_emb(next_items)
-            neg_emb = self.item_emb(neg_items)
+            neg_emb = self.item_emb(next_neg_items)
             pos_scores = torch.sum(final_emb * pos_emb, dim=-1)
             neg_scores = torch.sum(final_emb * neg_emb, dim=-1)
             loss = self.loss_func(pos_scores, neg_scores)
@@ -117,15 +124,21 @@ class HGN(nn.Module):
         
         return loss
     
-    def inference(self, his_seqs, user_seqs, topk):
+    def inference(self, interactions):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size)
+        his_seqs = interactions["his_seqs"]
+        user_seqs = interactions["user_seqs"]
+
         final_emb = self.encode_seqs(his_seqs, user_seqs)
         scores = final_emb @ self.item_emb.weight[1:].t()
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
     
-    def predict(self, his_seqs, user_seqs, test_items):
+    def predict(self, interactions):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size), test_items: (batch_size)
+        his_seqs = interactions["his_seqs"]
+        user_seqs = interactions["user_seqs"]
+        test_items = interactions["test_items"].to(torch.long)
+        
         final_emb = self.encode_seqs(his_seqs, user_seqs)
         test_emb = self.item_emb(test_items)
         scores = torch.sum(final_emb * test_emb, dim=-1)
