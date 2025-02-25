@@ -18,7 +18,7 @@ class LightGCN(nn.Module):
         num_layers,
         eps=1e-7,
 
-        loss_type: Literal["bpr", "ce"] = "bpr"
+        loss_type: Literal["bpr"] = "bpr"
     ):
         super(LightGCN, self).__init__()
         # Embedding Layer Parameters
@@ -40,8 +40,6 @@ class LightGCN(nn.Module):
     def get_loss_func(self):
         if self.loss_type == "bpr":
             return BPRLoss()
-        elif self.loss_type == "ce":
-            return CELoss()
         else:
             raise ValueError("Invalid loss type.")    
         
@@ -93,13 +91,17 @@ class LightGCN(nn.Module):
         user_latent, item_latent = torch.split(all_embeddings, [self.n_users, self.n_items], dim=0)
         return user_latent, item_latent
     
-    def forward(self, user, pos_item, neg_item):
-        # user: (batch_size), pos_item: (batch_size), neg_item: (batch_size)
+    def forward(self, interactions):
+        # users: (batch_size), items: (batch_size), neg_items: (batch_size)
+        users = interactions["users"].to(torch.long)
+        items = interactions["items"].to(torch.long)
+        neg_items = interactions["neg_items"].to(torch.long)
+
         user_latent, item_latent = self.encode_users_items()
 
-        tgt_user_latent = user_latent[user]
-        pos_item_latent = item_latent[pos_item-1]
-        neg_item_latent = item_latent[neg_item-1]
+        tgt_user_latent = user_latent[users]
+        pos_item_latent = item_latent[items]
+        neg_item_latent = item_latent[neg_items]
 
         pos_scores = torch.sum(tgt_user_latent * pos_item_latent, dim=-1)
         neg_scores = torch.sum(tgt_user_latent * neg_item_latent, dim=-1)
@@ -107,12 +109,23 @@ class LightGCN(nn.Module):
         loss = self.loss_func(pos_scores, neg_scores)
         return loss
 
-    def inference(self, user, topk):
-        # user: (batch_size)
+    def inference(self, interactions):
+        # users: (batch_size)
+        users = interactions["users"].to(torch.long)
         user_latent, item_latent = self.encode_users_items()
-        user_latent = user_latent[user]
+        user_latent = user_latent[users]
         scores = torch.matmul(user_latent, item_latent.t())
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
+    
+    def predict(self, interactions):
+        # users: (batch_size), test_items: (batch_size)
+        users = interactions["users"].to(torch.long)
+        test_items = interactions["test_items"].to(torch.long)
+
+        user_latent, item_latent = self.encode_users_items()
+        user_latent = user_latent[users]
+        test_item_latent = item_latent[test_items]
+        scores = torch.sum(user_latent * test_item_latent, dim=-1)
+        return scores
 
         

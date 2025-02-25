@@ -380,6 +380,7 @@ def run():
         if epoch % args.eval_step == 0:
             valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
             if valid_metric < best_valid_metric:
+                patience = 0
                 best_valid_metric = valid_metric
                 best_epoch = epoch
                 torch.save(model.state_dict(), save_file_path)

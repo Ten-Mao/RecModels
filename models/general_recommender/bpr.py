@@ -36,11 +36,15 @@ class BPR(nn.Module):
         else:
             raise ValueError("Invalid loss type.")
     
-    def forward(self, user_seqs, next_items, neg_items):
-        # user_seqs: (batch_size), next_items: (batch_size), neg_items: (batch_size)
-        user_emb = self.user_emb(user_seqs)
-        pos_emb = self.item_emb(next_items - 1)
-        neg_emb = self.item_emb(neg_items - 1)
+    def forward(self, interactions):
+        # users: (batch_size), items: (batch_size), neg_items: (batch_size)
+        users = interactions["users"].to(torch.long)
+        items = interactions["items"].to(torch.long)
+        neg_items = interactions["neg_items"].to(torch.long)
+
+        user_emb = self.user_emb(users)
+        pos_emb = self.item_emb(items)
+        neg_emb = self.item_emb(neg_items)
 
         pos_scores = torch.sum(user_emb * pos_emb, dim=-1)
         neg_scores = torch.sum(user_emb * neg_emb, dim=-1)
@@ -49,19 +53,21 @@ class BPR(nn.Module):
 
         return loss
     
-    def inference(self, user_seqs, topk):
-        # user_seqs: (batch_size)
-        user_emb = self.user_emb(user_seqs)
+    def inference(self, interactions):
+        # users: (batch_size)
+        users = interactions["users"].to(torch.long)
+        user_emb = self.user_emb(users)
         item_emb = self.item_emb.weight
 
         scores = user_emb @ item_emb.t()
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
     
-    def predict(self, user_seqs, test_items):
-        # user_seqs: (batch_size), test_items: (batch_size)
-        user_emb = self.user_emb(user_seqs)
-        test_emb = self.item_emb(test_items - 1)
+    def predict(self, interactions):
+        # users: (batch_size), test_items: (batch_size)
+        users = interactions["users"].to(torch.long)
+        test_items = interactions["test_items"].to(torch.long)
+        user_emb = self.user_emb(users)
+        test_emb = self.item_emb(test_items)
 
         scores = torch.sum(user_emb * test_emb, dim=-1)
         return scores

@@ -172,7 +172,7 @@ def initial_dataLoader(args):
         )
     }
 
-    return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items
+    return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
     model = SASRec(
@@ -343,8 +343,9 @@ def run():
     device = get_device(args)
 
     # initial dataLoader
-    train_loader, valid_loader, test_loader, num_items = initial_dataLoader(args)
+    train_loader, valid_loader, test_loader, num_items, num_users = initial_dataLoader(args)
     args.num_items = num_items
+    args.num_users = num_users
 
     # initial model
     model = initial_model(args, device)
@@ -387,6 +388,7 @@ def run():
         if epoch % args.eval_step == 0:
             valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
             if valid_metric < best_valid_metric:
+                patience = 0
                 best_valid_metric = valid_metric
                 best_epoch = epoch
                 torch.save(model.state_dict(), save_file_path)

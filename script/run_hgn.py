@@ -158,7 +158,7 @@ def initial_dataLoader(args):
         )
     }
 
-    return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items
+    return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
     model = HGN(
@@ -367,6 +367,7 @@ def run():
         if epoch % args.eval_step == 0:
             valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
             if valid_metric < best_valid_metric:
+                patience = 0
                 best_valid_metric = valid_metric
                 best_epoch = epoch
                 torch.save(model.state_dict(), save_file_path)

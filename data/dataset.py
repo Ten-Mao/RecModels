@@ -169,9 +169,111 @@ class SeqRecDataset(Dataset):
     def get_user_num(self):
         return len(self.inters)
 
+class GenRecDataset(Dataset):
+    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"]):
+        self.data_root_path = data_root_path
+        self.dataset = dataset
+        self.mode = mode
 
+        self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.csv")
+        assert os.path.exists(self.inter_path), f"Inter file not found in {self.inter_path}"
 
+        self.inters = self._load_inter(self.inter_path)
+        self.num_items = self.get_item_num()
+        self.num_users = self.get_user_num()
 
+        if self.mode == "train":
+            self.inter_data = self._process_train_data()
+        elif self.mode == "valid":
+            self.inter_data = self._process_valid_data()
+        elif self.mode == "test":
+            self.inter_data = self._process_test_data()
 
+    def __len__(self):
+        _len = len(self.inter_data)
+        return _len
+    
+    def __getitem__(self, idx):
+        sample = self.inter_data[idx]
+        return sample
+    
+    def _load_inter(self, inter_path):
+        inters = {}
+        inter_df = pd.read_csv(inter_path)
+        for row in inter_df.itertuples():
+            user_id = getattr(row, "user_id")
+            item_id = getattr(row, "item_id")
+            if user_id not in inters:
+                inters[user_id] = []
+            inters[user_id].append(item_id)
+        return inters
+    
+    def _process_train_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            items = items[:-2]
+            for item in items:
+                neg_item = random.choice(range(self.num_items))
+                while neg_item in items:
+                    neg_item = random.choice(range(self.num_items))
+                sample = {
+                    "users": np.array(user_id),
+                    "items": np.array(item),
+                    "neg_items": np.array(neg_item)
+                }
+                inter_data.append(sample)
+        return inter_data
 
+    def _process_valid_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            item = items[-2]
 
+            neg_item = random.choice(range(self.num_items))
+            while neg_item == item:
+                neg_item = random.choice(range(self.num_items))
+
+            sample = {
+                "users": np.array(user_id),
+                "items": np.array(item),
+                "neg_items": np.array(neg_item)
+            }
+            inter_data.append(sample)
+        return inter_data
+
+    def _process_test_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            item = items[-1]
+
+            neg_item = random.choice(range(self.num_items))
+            while neg_item == item:
+                neg_item = random.choice(range(self.num_items))
+                
+            sample = {
+                "users": np.array(user_id),
+                "items": np.array(item),
+                "neg_items": np.array(neg_item)
+            }
+            inter_data.append(sample)
+        return inter_data
+
+    def get_item_num(self):
+        return max([max(items) for items in self.inters.values ]) + 1
+
+    def get_user_num(self):
+        return len(self.inters)
+
+    def get_adjacency_matrix(self):
+        indices = []
+        values = []
+        for user_id, items in self.inters.items():
+            for item in items:
+                indices.append([user_id, item])
+                values.append(1)
+        adj_matrix = torch.sparse_coo_tensor(
+            indices=torch.tensor(indices).t(),
+            values=torch.tensor(values),
+            size=(self.num_users, self.num_items)
+        )
+        return adj_matrix
