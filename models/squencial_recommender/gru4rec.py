@@ -58,15 +58,21 @@ class Gru4Rec(nn.Module):
             res.append(his_emb[i, target_indices[i], :])
         return torch.stack(res, dim=0)
     
-    def forward(self, his_seqs, next_items, neg_items=None):
-        # his_seqs: (batch_size, seq_len), next_items: (batch_size), neg_items: (batch_size)
+    def forward(self, interactions):
+        # his_seqs: (batch_size, seq_len), next_items: (batch_size), next_neg_items: (batch_size)
+        his_seqs = interactions["his_seqs"]
+        next_items = interactions["next_items"].to(torch.long)
+        next_neg_items = interactions.get("next_neg_items", None)
+        if next_neg_items is not None:
+            next_neg_items = next_neg_items.to(torch.long)
         his_emb = self.encode_seqs(his_seqs)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         target_emb = self.extract(his_emb, target_indices)
 
-        if self.loss_type == "bpr" and neg_items is not None:
+        if self.loss_type == "bpr":
+            assert next_neg_items is not None
             pos_emb = self.item_emb(next_items)
-            neg_emb = self.item_emb(neg_items)
+            neg_emb = self.item_emb(next_neg_items)
             pos_scores = torch.sum(target_emb * pos_emb, dim=-1)
             neg_scores = torch.sum(target_emb * neg_emb, dim=-1)
             loss = self.loss_func(pos_scores, neg_scores)
@@ -77,18 +83,21 @@ class Gru4Rec(nn.Module):
             raise ValueError("Invalid loss type.")
         return loss
     
-    def inference(self, his_seqs, topk):
+    def inference(self, interactions):
         # his_seqs: (batch_size, seq_len)
+        his_seqs = interactions["his_seqs"]
         his_emb = self.encode_seqs(his_seqs)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
         target_emb = self.extract(his_emb, target_indices)
 
         scores = target_emb @ self.item_emb.weight[1:].t()
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
     
-    def predict(self, his_seqs, test_items):
+    def predict(self, interactions):
         # his_seqs: (batch_size, seq_len), test_items: (batch_size)
+        his_seqs = interactions["his_seqs"]
+        test_items = interactions["test_items"].to(torch.long)
+        
         his_emb = self.encode_seqs(his_seqs)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
         target_emb = self.extract(his_emb, target_indices)
