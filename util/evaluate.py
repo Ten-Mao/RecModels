@@ -19,7 +19,7 @@ def ndcg_at_k(pred, target, k):
     dcg = (hit_matrix / torch.log2(torch.arange(k, device=pred.device).float() + 2)).sum(dim=-1)
     idcg = 1.0
     ndcg = dcg / idcg
-    return torch.mean(ndcg).numpy()
+    return torch.mean(ndcg).detach().cpu().numpy()
 
 def recall_at_k(pred, target, k):
     """
@@ -37,4 +37,4 @@ def recall_at_k(pred, target, k):
     target = target.unsqueeze(-1)
     hit_matrix = (pred == target).float()
     recall = hit_matrix.sum(dim=-1)
-    return torch.mean(recall).numpy()
+    return torch.mean(recall).detach().cpu().numpy()

@@ -130,42 +130,51 @@ class Bert4Rec(nn.Module):
         x_pad[torch.arange(his_seqs.shape[0]), target_indices] = self.mask_idx 
         return x_pad, target_indices
 
-    def forward(self, his_seqs, mask_indices, tgt_items, neg_items=None):
-        # his_seqs: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], tgt_items: [batch_size, max_mask_len], neg_items: [batch_size, max_mask_len]
-        move_pad_mask_indices = torch.max(mask_indices, torch.zeros_like(mask_indices))
-        mask_onehot = F.one_hot(move_pad_mask_indices.reshape(-1), num_classes=his_seqs.shape[1])
+    def forward(self, interactions):
+        # masked_his_seqs: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], mask_items: [batch_size, max_mask_len], mask_neg_items: [batch_size, max_mask_len]
+        masked_his_seqs = interactions["masked_his_seqs"]
+        mask_indices = interactions["mask_indices"]
+        mask_items = interactions["mask_items"].to(torch.long)
+        mask_neg_items = interactions.get("mask_neg_items", None)
+        if mask_neg_items is not None:
+            mask_neg_items = mask_neg_items.to(torch.long)
+
+        mask_onehot = F.one_hot(mask_indices.reshape(-1), num_classes=masked_his_seqs.shape[1])
         mask_onehot = mask_onehot.reshape(mask_indices.shape[0], mask_indices.shape[1], -1)
-        his_emb = self.encode_seqs(his_seqs)
+        his_emb = self.encode_seqs(masked_his_seqs)
         # mask_onehot: [batch_size, max_mask_len, seq_len] -> [batch_size, max_mask_len, d_model]
         pred_emb = mask_onehot @ his_emb 
 
         if self.loss_type == "bpr":
-            assert neg_items is not None
-            pos_emb = self.item_emb(tgt_items)
-            neg_emb = self.item_emb(neg_items)
+            assert mask_neg_items is not None
+            pos_emb = self.item_emb(mask_items)
+            neg_emb = self.item_emb(mask_neg_items)
             pos_scores = torch.sum(pred_emb * pos_emb, dim=-1)
             neg_scores = torch.sum(pred_emb * neg_emb, dim=-1)
-            mask = (tgt_items != self.pad_idx) & (neg_items != self.pad_idx)
+            mask = (mask_items != self.pad_idx)
             loss = self.loss_func(pos_scores, neg_scores, mask=mask)
         elif self.loss_type == "ce":
             scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]
-            loss = self.loss_func(scores, tgt_items - 1, ignore_index=self.pad_idx)
+            loss = self.loss_func(scores, mask_items - 1, ignore_index=self.pad_idx)
         else:
             raise ValueError("Invalid loss type.")
 
         return loss
     
-    def inference(self, his_seqs, topk):
+    def inference(self, interactions):
         # his_seqs: [batch_size, seq_len]
+        his_seqs = interactions["his_seqs"]
         his_seqs, target_indices = self.inject(his_seqs)
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:-1].t() # [batch_size, n_items]
-        _, indices = torch.topk(scores, topk, dim=-1, largest=True, sorted=True)
-        return indices + 1
+        return scores
     
-    def predict(self, his_seqs, test_items):
+    def predict(self, interactions):
         # his_seqs: [batch_size, seq_len], test_items: [batch_size]
+        his_seqs = interactions["his_seqs"]
+        test_items = interactions["test_items"].to(torch.long)
+
         his_seqs, target_indices = self.inject(his_seqs)
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)

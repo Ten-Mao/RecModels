@@ -122,17 +122,17 @@ class SASRec(nn.Module):
         # his_seqs: [batch_size, seq_len], next_items: [batch_size], neg_items: [batch_size]
         his_seqs = interactions["his_seqs"]
         next_items = interactions["next_items"].to(torch.long)
-        neg_items = interactions.get("neg_items", None)
-        if neg_items is not None:
-            neg_items = neg_items.to(torch.long)
+        next_neg_items = interactions.get("next_neg_items", None)
+        if next_neg_items is not None:
+            next_neg_items = next_neg_items.to(torch.long)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
 
         if self.loss_type == "bpr":
-            assert neg_items is not None
+            assert next_neg_items is not None
             pos_emb = self.item_emb(next_items)
-            neg_emb = self.item_emb(neg_items)
+            neg_emb = self.item_emb(next_neg_items)
             pos_scores = torch.sum(target_emb * pos_emb, dim=-1)
             neg_scores = torch.sum(target_emb * neg_emb, dim=-1)
             loss = self.loss_func(pos_scores, neg_scores)

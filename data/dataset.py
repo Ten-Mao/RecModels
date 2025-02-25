@@ -10,10 +10,12 @@ import random
 
 class SeqRecDataset(Dataset):
 
-    def __init__(self, data_root_path, dataset, max_len, mode:Literal["train", "valid", "test"]):
+    def __init__(self, data_root_path, dataset, max_len, mode:Literal["train", "valid", "test"], mask_ratio=0.15):
         self.data_root_path = data_root_path
         self.dataset = dataset
         self.max_len = max_len
+        self.mask_ratio = mask_ratio
+        self.max_mask_len = int(max_len * mask_ratio)
         self.mode = mode
 
         self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.csv")
@@ -62,10 +64,28 @@ class SeqRecDataset(Dataset):
                     seq = seq + [0] * (self.max_len - len(seq))
                 else:
                     seq = seq[-self.max_len:]
+                neg_target = random.choice(range(self.num_items)) + 1
+
+                mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+                masked_seq = seq.copy()
+                for item in mask_seq_items_index:
+                    masked_seq[item] = self.num_items + 1
+                mask_seq_items = []
+                for item in mask_seq_items_index:
+                    mask_seq_items.append(seq[item])
+                neg_mask_seq_items = []
+                for item in mask_seq_items_index:
+                    neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
                 sample = {
                     "user_seqs": np.array(user_id),
                     "his_seqs": np.array(seq),
-                    "next_items": np.array(target)
+                    "next_items": np.array(target),
+                    "next_neg_items": np.array(neg_target),
+
+                    "masked_his_seqs": np.array(masked_seq),
+                    "mask_indices": np.array(mask_seq_items_index),
+                    "mask_items": np.array(mask_seq_items),
+                    "mask_neg_items": np.array(neg_mask_seq_items)
                 }
                 inter_data.append(sample)
         return inter_data
@@ -81,10 +101,28 @@ class SeqRecDataset(Dataset):
                 seq = seq + [0] * (self.max_len - len(seq))
             else:
                 seq = seq[-self.max_len:]
+            neg_target = random.choice(range(self.num_items)) + 1
+
+            mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+            masked_seq = seq.copy()
+            for item in mask_seq_items_index:
+                masked_seq[item] = self.num_items + 1
+            mask_seq_items = []
+            for item in mask_seq_items_index:
+                mask_seq_items.append(seq[item])
+            neg_mask_seq_items = []
+            for item in mask_seq_items_index:
+                neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
             sample = {
                 "user_seqs": np.array(user_id),
                 "his_seqs": np.array(seq),
-                "next_items": np.array(target)
+                "next_items": np.array(target),
+                "next_neg_items": np.array(neg_target),
+
+                "masked_his_seqs": np.array(masked_seq),
+                "mask_indices": np.array(mask_seq_items_index),
+                "mask_items": np.array(mask_seq_items),
+                "mask_neg_items": np.array(neg_mask_seq_items)
             }
             inter_data.append(sample)
         return inter_data
@@ -99,10 +137,28 @@ class SeqRecDataset(Dataset):
                 seq = seq + [0] * (self.max_len - len(seq))
             else:
                 seq = seq[-self.max_len:]
+            neg_target = random.choice(range(self.num_items)) + 1
+
+            mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+            masked_seq = seq.copy()
+            for item in mask_seq_items_index:
+                masked_seq[item] = self.num_items + 1
+            mask_seq_items = []
+            for item in mask_seq_items_index:
+                mask_seq_items.append(seq[item])
+            neg_mask_seq_items = []
+            for item in mask_seq_items_index:
+                neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
             sample = {
                 "user_seqs": np.array(user_id),
                 "his_seqs": np.array(seq),
-                "next_items": np.array(target)
+                "next_items": np.array(target),
+                "next_neg_items": np.array(neg_target),
+
+                "masked_his_seqs": np.array(masked_seq),
+                "mask_indices": np.array(mask_seq_items_index),
+                "mask_items": np.array(mask_seq_items),
+                "mask_neg_items": np.array(neg_mask_seq_items)
             }
             inter_data.append(sample)
         return inter_data

@@ -1,1 +1,1 @@
-,seed,emb_dropout,d_model,n_heads,attn_dropout,inner_dim,ffn_activation,ffn_dropout,eps,num_layers,loss_type,lr,weight_decay,optimizer,warmup_ratio,scheduler_type,eval_step,early_stop_step,time,Recall@5,NDCG@5,Recall@10,NDCG@10
+,seed,emb_dropout,d_model,n_heads,attn_dropout,inner_dim,ffn_activation,ffn_dropout,eps,num_layers,loss_type,epochs,train_batch_size,valid_batch_size,test_batch_size,max_len,lr,weight_decay,optimizer,warmup_ratio,scheduler_type,eval_step,early_stop_step,time,Recall@5,NDCG@5,Recall@10,NDCG@10

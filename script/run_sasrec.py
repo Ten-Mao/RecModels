@@ -36,27 +36,27 @@ def parser_args():
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
-    parser.add_argument("--emb_dropout", type=float, default=0.5)
-    parser.add_argument("--d_model", type=int, default=64)
+    parser.add_argument("--emb_dropout", type=float, default=0.1)
+    parser.add_argument("--d_model", type=int, default=32)
     parser.add_argument("--n_heads", type=int, default=2)
-    parser.add_argument("--attn_dropout", type=float, default=0.5)
-    parser.add_argument("--inner_dim", type=int, default=256)
+    parser.add_argument("--attn_dropout", type=float, default=0.1)
+    parser.add_argument("--inner_dim", type=int, default=32)
     parser.add_argument("--ffn_activation", choices=["relu", "gelu"], default="gelu")
-    parser.add_argument("--ffn_dropout", type=float, default=0.5)
+    parser.add_argument("--ffn_dropout", type=float, default=0.1)
     parser.add_argument("--eps", type=float, default=1e-12)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--train_batch_size", type=int, default=128)
-    parser.add_argument("--valid_batch_size", type=int, default=32)
-    parser.add_argument("--test_batch_size", type=int, default=32)
+    parser.add_argument("--train_batch_size", type=int, default=1024)
+    parser.add_argument("--valid_batch_size", type=int, default=256)
+    parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=0)
+    parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
-    parser.add_argument("--warmup_ratio", type=float, default=0.1)
+    parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--scheduler_type", choices=["cosine", "linear"], default="cosine")
     parser.add_argument("--eval_step", type=int, default=1)
     parser.add_argument("--early_stop_step", type=int, default=10)
@@ -84,6 +84,12 @@ def parser_args():
             "eps", 
             "num_layers", 
             "loss_type",
+
+            "epochs",
+            "train_batch_size",
+            "valid_batch_size",
+            "test_batch_size",
+            "max_len",
             "lr",
             "weight_decay",
             "optimizer",
@@ -91,6 +97,7 @@ def parser_args():
             "scheduler_type",
             "eval_step",
             "early_stop_step",
+
             "time",
             "Recall@5",
             "NDCG@5",
@@ -243,7 +250,7 @@ def train_epoch(
         scheduler.step()
         total_loss.append(loss.item())
 
-        if (step + 1) % 100 == 0:
+        if (step + 1) % 10 == 0:
             logger.log(
                 f"Step [{step + 1}/{len(train_loader)}] - "
                 f"Avg Loss: {np.mean(total_loss):.4f}, "
@@ -318,7 +325,11 @@ def test(
     model_result_df = pd.read_csv(model_result_path)
     new_line = {k: v for k, v in args.__dict__.items() if k in args.params_in_model_result}
     new_line.update({f"{metric}@{k}": v for metric, values in result.items() for k, v in values.items()})
-    model_result_df = model_result_df.append(new_line, ignore_index=True)
+    new_line_df = pd.DataFrame([new_line])
+    if model_result_df.empty:
+        model_result_df = new_line_df  # 直接赋值，避免 concat() 产生警告
+    else:
+        model_result_df = pd.concat([model_result_df, new_line_df], ignore_index=True)
     model_result_df.to_csv(model_result_path, index=True)
 
 
@@ -382,13 +393,14 @@ def run():
                 logger.log(f"Save model at epoch [{epoch + 1}]")
             else:
                 patience += 1
+                logger.log(f"Patience: {patience}/{args.early_stop_step}")
                 if patience >= args.early_stop_step:
                     logger.log(f"Early stop at epoch [{epoch + 1}]")
                     break
     logger.log(f"Best epoch: {best_epoch + 1}, Best valid metric: {best_valid_metric:.4f}")
     
     # test
-    model.load_state_dict(torch.load(save_file_path))
+    model.load_state_dict(torch.load(save_file_path, weights_only=True))
     test(model, test_loader, device, logger, args, model_result_file_path)
 
 
