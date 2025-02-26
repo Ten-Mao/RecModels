@@ -66,6 +66,12 @@ class FM(nn.Module):
         assert loss_type == "bce", "Only support BCE loss for FM"
         self.loss_type = loss_type
         self.loss_func = self.get_loss_func()
+        self.apply(self.init_weights)
+    
+    def init_weights(self, module):
+        if isinstance(module, nn.Parameter):
+            nn.init.constant_(module, 0)
+
 
     def get_loss_func(self):
         if self.loss_type == "bce":

@@ -59,7 +59,15 @@ class DeepFM(nn.Module):
         assert loss_type == "bce", "DeepFM only supports BCE loss"
         self.loss_type = loss_type
         self.loss_func = self.get_loss_func()
+        self.apply(self.init_weights)
     
+    def init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+
+
     def get_loss_func(self):
         if self.loss_type == "bce":
             return BCELoss()

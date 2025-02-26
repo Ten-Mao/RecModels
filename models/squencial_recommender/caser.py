@@ -55,6 +55,21 @@ class Caser(nn.Module):
 
         self.loss_type = loss_type
         self.loss_func = self.get_loss_func()
+        self.apply(self.init_weights)
+    
+    def init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight)
+            if module.padding_idx is not None:
+                nn.init.constant_(module.weight[module.padding_idx], 0)
+        elif isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+        elif isinstance(module, nn.Conv2d):
+            nn.init.xavier_normal_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
 
     def get_loss_func(self):
         if self.loss_type == "bpr":

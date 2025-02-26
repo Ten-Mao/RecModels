@@ -36,6 +36,15 @@ class LightGCN(nn.Module):
         self.loss_type = loss_type
         assert self.loss_type == "bpr" "the only loss type supported by LightGCN is BPR"
         self.loss_func = self.get_loss_func()
+        self.apply(self.init_weights)
+    
+    def init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight)
+        elif isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
 
     def get_loss_func(self):
         if self.loss_type == "bpr":

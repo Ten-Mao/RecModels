@@ -20,6 +20,14 @@ class TSFEmbedding(nn.Module):
         self.token_sequence_field_emb = [
             nn.Embedding(num + 1, emb_dim, padding_idx=padding_idx) for num in token_sequence_field_value_num_list
         ]
+        self.mode = mode
+        self.apply(self.init_weights)
+    
+    def init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight)
+            if module.padding_idx is not None:
+                nn.init.constant_(module.weight[module.padding_idx], 0)
     
     def forward(self, x):
         # x: [(batch_size, seq_len_i), ...] len(x) == num_token_sequence_fields

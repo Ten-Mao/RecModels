@@ -19,7 +19,15 @@ class TFEmbedding(nn.Module):
         self.token_field_emb = [
             nn.Embedding(num + 1, emb_dim, padding_idx=padding_idx) for num in token_field_value_num_list
         ]
+        self.apply(self.init_weights)
     
+    def init_weights(self, module):
+        if isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight)
+            if module.padding_idx is not None:
+                nn.init.constant_(module.weight[module.padding_idx], 0) # Zero out the padding index
+
+
     def forward(self, x):
         # x: (batch_size, num_token_field)
         assert x.shape[-1] == self.num_token_fields, "The last dimension of x must be equal to the number of token fields"

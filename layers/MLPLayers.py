@@ -38,7 +38,14 @@ class MLPLayers(nn.Module):
             self.layers.append(activation_fn)
         
         self.mlp = nn.Sequential(*self.layers)
+        self.apply(self.init_weights)
     
+    def init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+
 
     def get_activation_fn(self, activation):
         if activation == None:
