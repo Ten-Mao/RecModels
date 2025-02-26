@@ -1,3 +1,4 @@
+from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +10,7 @@ class MLPLayers(nn.Module):
 
         dim_list,
         dropout=0.1,
-        activation_fn="relu",
+        activation_fn:Literal["relu", "gelu", "sigmoid", "tanh"]="relu",
         bn=False,
         last_activation=True,
     ):

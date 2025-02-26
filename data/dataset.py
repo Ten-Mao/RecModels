@@ -277,3 +277,256 @@ class GenRecDataset(Dataset):
             size=(self.num_users, self.num_items)
         )
         return adj_matrix
+
+class ConRecDataset(Dataset):
+    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"]):
+        self.data_root_path = data_root_path
+        self.dataset = dataset
+        self.mode = mode
+
+        self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.csv")
+        assert os.path.exists(self.inter_path), f"Inter file not found in {self.inter_path}"
+
+        self.item_path = os.path.join(data_root_path, dataset, f"{dataset}.item.csv")
+        assert os.path.exists(self.item_path), f"Item file not found in {self.item_path}"
+
+        self.user_path = os.path.join(data_root_path, dataset, f"{dataset}.user.csv")
+        assert os.path.exists(self.user_path), f"User file not found in {self.user_path}"
+
+        self.inters = self._load_inter(self.inter_path)
+        self.items = self._load_item(self.item_path)
+        self.users = self._load_user(self.user_path)
+
+        self.num_items = self.get_item_num()
+        self.num_users = self.get_user_num()
+
+        self.token_field_value_num_list = self.get_token_field_value_num_list()
+        self.token_sequence_field_value_num_list = self.get_token_sequence_field_value_num_list()
+
+        if self.mode == "train":
+            self.inter_data = self._process_train_data()
+        elif self.mode == "valid":
+            self.inter_data = self._process_valid_data()
+        elif self.mode == "test":
+            self.inter_data = self._process_test_data()
+
+    def __len__(self):
+        _len = len(self.inter_data)
+        return _len
+    
+    def __getitem__(self, idx):
+        sample = self.inter_data[idx]
+        return sample
+    
+    def _load_inter(self, inter_path):
+        inters = {}
+        inter_df = pd.read_csv(inter_path)
+        for row in inter_df.itertuples():
+            user_id = getattr(row, "user_id")
+            item_id = getattr(row, "item_id")
+            if user_id not in inters:
+                inters[user_id] = []
+            inters[user_id].append(item_id)
+        return inters
+    
+    def _load_item(self, item_path):
+        items = {}
+        item_df = pd.read_csv(item_path)
+        column_name_list = item_df.columns.difference(['index']).to_list()
+        type_list = {}
+        for idx, row in enumerate(item_df.itertuples(index=False)):
+            if idx == 0:
+                for column_name in column_name_list:
+                    type_i = getattr(row, column_name)
+                    type_list[column_name] = type_i
+            else:
+                item_id = getattr(row, "item_id")
+                token_field_values = []
+                token_sequence_field_values = []
+                for column_name in column_name_list:
+                    value_i = getattr(row, column_name)
+                    if type_list[column_name] == "token":
+                        token_field_values.append(value_i)
+                    elif type_list[column_name] == "token_seq":
+                        token_sequence_field_values.append(value_i.strip().split(" "))
+                    else:
+                        raise ValueError("Invalid type.")
+                items[item_id] = {
+                    "token_field_values": token_field_values,
+                    "token_sequence_field_values": token_sequence_field_values
+                }
+        return items
+    
+    def _load_user(self, user_path):
+        users = {}
+        user_df = pd.read_csv(user_path)
+        column_name_list = user_df.columns.difference(['index']).to_list()
+        type_list = {}
+        for idx, row in enumerate(user_df.itertuples(index=False)):
+            if idx == 0:
+                for column_name in column_name_list:
+                    type_i = getattr(row, column_name)
+                    type_list[column_name] = type_i
+            else:
+                user_id = getattr(row, "item_id")
+                token_field_values = []
+                token_sequence_field_values = []
+                for column_name in column_name_list:
+                    value_i = getattr(row, column_name)
+                    if type_list[column_name] == "token":
+                        token_field_values.append(value_i)
+                    elif type_list[column_name] == "token_seq":
+                        token_sequence_field_values.append(value_i.strip().split(" "))
+                    else:
+                        raise ValueError("Invalid type.")
+                users[user_id] = {
+                    "token_field_values": token_field_values,
+                    "token_sequence_field_values": token_sequence_field_values
+                }
+        return users
+
+    def _process_train_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            items = items[:-2]
+            token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+            token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+            for item in items:
+                token_field_values.extend(self.items[item]["token_field_values"])
+                token_sequence_field_values.extend(
+                    [
+                        np.array(item_token_seq_value) 
+                        for item_token_seq_value in self.items[item]["token_sequence_field_values"]
+                    ]
+                )
+                sample = {
+                    "token_field_values": np.array(token_field_values),
+                    "token_sequence_field_values": token_sequence_field_values,
+                    "labels": np.array(1)
+                }
+                inter_data.append(sample)
+
+                # negative sampling
+                neg_item = random.choice(range(self.num_items))
+                while neg_item in items:
+                    neg_item = random.choice(range(self.num_items))
+                token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+                token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+                token_field_values.extend(self.items[neg_item]["token_field_values"])
+                token_sequence_field_values.extend(
+                    [
+                        np.array(neg_item_token_seq_value) 
+                        for neg_item_token_seq_value in self.items[neg_item]["token_sequence_field_values"]
+                    ]
+                )
+                sample = {
+                    "token_field_values": np.array(token_field_values),
+                    "token_sequence_field_values": token_sequence_field_values,
+                    "labels": np.array(0)
+                }
+        return inter_data
+
+    def _process_valid_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            item = items[-2]
+            token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+            token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+            token_field_values.extend(self.items[item]["token_field_values"])
+            token_sequence_field_values.extend(
+                [
+                    np.array(item_token_seq_value) 
+                    for item_token_seq_value in self.items[item]["token_sequence_field_values"]
+                ]
+            )
+            sample = {
+                "token_field_values": np.array(token_field_values),
+                "token_sequence_field_values": token_sequence_field_values,
+                "labels": np.array(1)
+            }
+            inter_data.append(sample)
+
+            # negative sampling
+            neg_item = random.choice(range(self.num_items))
+            while neg_item == item:
+                neg_item = random.choice(range(self.num_items))
+            token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+            token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+            token_field_values.extend(self.items[neg_item]["token_field_values"])
+            token_sequence_field_values.extend(
+                [
+                    np.array(neg_item_token_seq_value) 
+                    for neg_item_token_seq_value in self.items[neg_item]["token_sequence_field_values"]
+                ]
+            )
+            sample = {
+                "token_field_values": np.array(token_field_values),
+                "token_sequence_field_values": token_sequence_field_values,
+                "labels": np.array(0)
+            }
+            inter_data.append(sample)
+        return inter_data
+
+    def _process_test_data(self):
+        inter_data = []
+        for user_id, items in self.inters.items():
+            item = items[-1]
+            token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+            token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+            token_field_values.extend(self.items[item]["token_field_values"])
+            token_sequence_field_values.extend(
+                [
+                    np.array(item_token_seq_value) 
+                    for item_token_seq_value in self.items[item]["token_sequence_field_values"]
+                ]
+            )
+            sample = {
+                "token_field_values": np.array(token_field_values),
+                "token_sequence_field_values": token_sequence_field_values,
+                "labels": np.array(1)
+            }
+            inter_data.append(sample)
+
+            # negative sampling
+            neg_item = random.choice(range(self.num_items))
+            while neg_item == item:
+                neg_item = random.choice(range(self.num_items))
+            token_field_values = [user_token_value for user_token_value in self.users[user_id]["token_field_values"]]
+            token_sequence_field_values = [np.array(user_token_seq_value) for user_token_seq_value in self.users[user_id]["token_sequence_field_values"]]
+            token_field_values.extend(self.items[neg_item]["token_field_values"])
+            token_sequence_field_values.extend(
+                [
+                    np.array(neg_item_token_seq_value) 
+                    for neg_item_token_seq_value in self.items[neg_item]["token_sequence_field_values"]
+                ]
+            )
+            sample = {
+                "token_field_values": np.array(token_field_values),
+                "token_sequence_field_values": token_sequence_field_values,
+                "labels": np.array(0)
+            }
+            inter_data.append(sample)
+        return inter_data 
+
+    def get_item_num(self):
+        return max([max(items) for items in self.inters.values]) + 1
+
+    def get_user_num(self):
+        return len(self.inters)
+    
+    def get_token_field_value_num_list(self):
+        token_field_value_num_list = [0 for _ in range(len(self.items[0]["token_field_values"]))]
+        for item in self.items.values():
+            for idx, token_field_value in enumerate(item["token_field_values"]):
+                token_field_value_num_list[idx] = max(token_field_value_num_list[idx], token_field_value)
+
+        return token_field_value_num_list
+    
+    def get_token_sequence_field_value_num_list(self):
+        token_sequence_field_value_num_list = [0 for _ in range(len(self.items[0]["token_sequence_field_values"]))]
+        for item in self.items.values():
+            for idx, token_sequence_field_values in enumerate(item["token_sequence_field_values"]):
+                for token_sequence_value in token_sequence_field_values:
+                    token_sequence_field_value_num_list[idx] = max(token_sequence_field_value_num_list[idx], token_sequence_value)
+        
+        return token_sequence_field_value_num_list

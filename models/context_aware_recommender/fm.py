@@ -111,20 +111,25 @@ class FM(nn.Module):
 
         return output       
 
-    def forward(self, token_field_values, token_sequence_field_values, labels):
+    def forward(self, interactions):
         # token_field_values: (batch_size, num_token_fields)
         # token_sequence_field_values: [(batch_size, seq_len_i), ...] the length of the list is the number of token sequence fields
         # labels: (batch_size)
-        
+        token_field_values = interactions["token_field_values"].to(torch.long)
+        token_sequence_field_values = [seq_field.to(torch.long) for seq_field in interactions["token_sequence_field_values"]]
+        labels = interactions["labels"].to(torch.long)
+
         output = self.encode(token_field_values, token_sequence_field_values) # (batch_size, d_output)
         output = output.squeeze(dim=-1) # (batch_size)
         loss = self.loss_func(output, labels)
         return loss
     
-    def predict(self, token_field_values, token_sequence_field_values):
+    def predict(self, interactions):
         # token_field_values: (batch_size, num_token_fields)
         # token_sequence_field_values: [(batch_size, seq_len_i), ...] the length of the list is the number of token sequence fields
-        
+        token_field_values = interactions["token_field_values"].to(torch.long)
+        token_sequence_field_values = [seq_field.to(torch.long) for seq_field in interactions["token_sequence_field_values"]]
+
         output = self.encode(token_field_values, token_sequence_field_values) # (batch_size, d_output)
         output = output.squeeze(dim=-1) # (batch_size)
         return F.sigmoid(output)

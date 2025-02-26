@@ -385,27 +385,32 @@ def run():
     best_valid_metric = math.inf
     best_epoch = -1
     patience = 0
-    for epoch in range(args.epochs):
-        train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
-        if epoch % args.eval_step == 0:
-            valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
-            if valid_metric < best_valid_metric:
-                patience = 0
-                best_valid_metric = valid_metric
-                best_epoch = epoch
-                torch.save(model.state_dict(), save_file_path)
-                logger.log(f"Save model at epoch [{epoch + 1}]")
-            else:
-                patience += 1
-                logger.log(f"Patience: {patience}/{args.early_stop_step}")
-                if patience >= args.early_stop_step:
-                    logger.log(f"Early stop at epoch [{epoch + 1}]")
-                    break
-    logger.log(f"Best epoch: {best_epoch + 1}, Best valid metric: {best_valid_metric:.4f}")
-    
-    # test
-    model.load_state_dict(torch.load(save_file_path, weights_only=True))
-    test(model, test_loader, device, logger, args, model_result_file_path)
+
+    try:
+        for epoch in range(args.epochs):
+            train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
+            if epoch % args.eval_step == 0:
+                valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
+                if valid_metric < best_valid_metric:
+                    patience = 0
+                    best_valid_metric = valid_metric
+                    best_epoch = epoch
+                    torch.save(model.state_dict(), save_file_path)
+                    logger.log(f"Save model at epoch [{epoch + 1}]")
+                else:
+                    patience += 1
+                    logger.log(f"Patience: {patience}/{args.early_stop_step}")
+                    if patience >= args.early_stop_step:
+                        logger.log(f"Early stop at epoch [{epoch + 1}]")
+                        break
+        logger.log(f"Best epoch: {best_epoch + 1}, Best valid metric: {best_valid_metric:.4f}")
+        
+        # test
+        model.load_state_dict(torch.load(save_file_path, weights_only=True))
+        test(model, test_loader, device, logger, args, model_result_file_path)
+    except Exception as e:
+        logger.log(f"Error: {e}")
+        exit(1)
 
 
 if __name__ == "__main__":
