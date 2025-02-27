@@ -48,7 +48,7 @@ def parser_args():
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
-    parser.add_argument("--scheduler_type", choices=["cosine", "linear"], default="cosine")
+    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="cosine")
     parser.add_argument("--eval_step", type=int, default=1)
     parser.add_argument("--early_stop_step", type=int, default=10)
 
@@ -223,7 +223,7 @@ def initial_optimizer_scheduler(args, model, batchnum_per_epoch):
     scheduler = LambdaLR(
         optimizer,
         lr_lambda=lr_lambda_cos if args.scheduler_type == "cosine" else lr_lambda_linear
-    )
+    ) if args.scheduler_type != "none" else None
 
     return optimizer, scheduler
     
@@ -248,15 +248,22 @@ def train_epoch(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
         total_loss.append(loss.item())
 
         if (step + 1) % 10 == 0:
-            logger.log(
-                f"Step [{step + 1}/{len(train_loader)}] - "
-                f"Avg Loss: {np.mean(total_loss):.4f}, "
-                f"Current lr: {scheduler.get_last_lr()[0]:.10f}"
-            )
+            if scheduler is not None:
+                logger.log(
+                    f"Step [{step + 1}/{len(train_loader)}] - "
+                    f"Avg Loss: {np.mean(total_loss):.4f}, "
+                    f"Current lr: {scheduler.get_last_lr()[0]:.10f}"
+                )
+            else:
+                logger.log(
+                    f"Step [{step + 1}/{len(train_loader)}] - "
+                    f"Avg Loss: {np.mean(total_loss):.4f}"
+                )
     
     logger.log(f"Epoch [{epoch + 1}] - Avg Loss: {np.mean(total_loss):.4f}")
             
