@@ -350,7 +350,7 @@ class ConRecDataset(Dataset):
                     elif type_list[column_name] == "token_seq":
                         token_sequence_field_values.append(value_i.strip().split(" "))
                     else:
-                        raise ValueError("Invalid type.")
+                        continue
                 items[item_id] = {
                     "token_field_values": token_field_values,
                     "token_sequence_field_values": token_sequence_field_values
@@ -378,7 +378,7 @@ class ConRecDataset(Dataset):
                     elif type_list[column_name] == "token_seq":
                         token_sequence_field_values.append(value_i.strip().split(" "))
                     else:
-                        raise ValueError("Invalid type.")
+                        continue
                 users[user_id] = {
                     "token_field_values": token_field_values,
                     "token_sequence_field_values": token_sequence_field_values
