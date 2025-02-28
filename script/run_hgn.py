@@ -392,7 +392,7 @@ def run():
         # test
         model.load_state_dict(torch.load(save_file_path, weights_only=True))
         test(model, test_loader, device, logger, args, model_result_file_path)
-    except Exception as e:
+    except BaseException as e:
         logger.log(f"Error: {e}")
         exit(1)
 
