@@ -107,8 +107,8 @@ class SASRec(nn.Module):
         x = x * query_padding_mask.int().unsqueeze(-1)
 
         for i in range(self.num_layers):
-            q, k, v = self.attn_norm[i](x), x, x
-            x = self.attn[i](q, k, v, key_padding_mask=key_padding_mask, query_padding_mask=query_padding_mask)
+            x = self.attn_norm[i](x)
+            x = self.attn[i](x, x, x, key_padding_mask=key_padding_mask, query_padding_mask=query_padding_mask)
 
             x = self.ffn_norm[i](x)
             x = self.ffn[i](x)
