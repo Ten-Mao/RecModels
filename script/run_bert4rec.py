@@ -22,10 +22,10 @@ from util.logger import Logger
 from util.util import ensure_dir, ensure_file
 import pandas as pd
 
-
+MODEL_NAME="Bert4Rec"
 
 def parser_args():
-    parser = argparse.ArgumentParser(description="SASRec")
+    parser = argparse.ArgumentParser(description=MODEL_NAME)
     # global
     parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -365,10 +365,10 @@ def run():
     # ensure the log, save and result path
     time_now = time.strftime("%Y_%m_%d_%H_%M", time.localtime())
     args.time = time_now
-    log_file_path = os.path.join(args.log_root_path, args.dataset, f"SASRec-{time_now}.log")
+    log_file_path = os.path.join(args.log_root_path, args.dataset, f"{MODEL_NAME}-{time_now}.log")
     save_dir_path = os.path.join(args.save_root_path, args.dataset)
-    save_file_path = os.path.join(args.save_root_path, args.dataset, f"SASRec-{time_now}.pth")
-    model_result_file_path = os.path.join(args.result_root_path, args.dataset, f"SASRec.result.csv")
+    save_file_path = os.path.join(args.save_root_path, args.dataset, f"{MODEL_NAME}-{time_now}.pth")
+    model_result_file_path = os.path.join(args.result_root_path, args.dataset, f"{MODEL_NAME}.result.csv")
     # all_model_result_path = os.path.join(args.result_root_path, args.dataset, "All.result.csv")
     ensure_file(log_file_path)
     ensure_dir(save_dir_path)
