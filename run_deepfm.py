@@ -13,16 +13,15 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-from data.dataset import SeqRecDataset
+from data.dataset import ConRecDataset
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
-from models.squencial_recommender.caser import Caser
-from util.evaluate import ndcg_at_k, recall_at_k
+from models.context_aware_recommender.deepfm import DeepFM
 from util.logger import Logger
 from util.util import ensure_dir, ensure_file
 import pandas as pd
 
-MODEL_NAME="Caser"
+MODEL_NAME="DeepFM"
 
 def parser_args():
     parser = argparse.ArgumentParser(description=MODEL_NAME)
@@ -31,59 +30,56 @@ def parser_args():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     # data
-    parser.add_argument("--data_path", type=str, default="../data/")
+    parser.add_argument("--data_path", type=str, default="./data/")
     parser.add_argument("--dataset", choices=["Beauty2014", "Yelp"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
     parser.add_argument("--d_model", type=int, default=32)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--n_horizontal_conv_per_h", type=int, default=2)
-    parser.add_argument("--n_vertical_conv", type=int, default=2)
-    parser.add_argument("--activation_conv", choices=["relu", "tanh"], default="relu")
-    parser.add_argument("--activation_fc", choices=["relu", "tanh"], default="relu")
-    parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
+    parser.add_argument("--inner_dim", type=int, default=64)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--activation_fn", choices=["relu", "gelu", "sigmoid", "tanh"], default="relu")
+    parser.add_argument("--bn", action="store_true")
+    parser.add_argument("--token_sequence_field_agg_method", choices=["mean", "sum", "max"], default="mean")
+    parser.add_argument("--loss_type", choices=["bce"], default="bce")
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--train_batch_size", type=int, default=1024)
+    parser.add_argument("--train_batch_size", type=int, default=256)
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
-    parser.add_argument("--max_len", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
-    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="cosine")
+    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
     parser.add_argument("--eval_step", type=int, default=1)
-    parser.add_argument("--early_stop_step", type=int, default=10)
+    parser.add_argument("--early_stop_step", type=int, default=20)
 
     # test
-    parser.add_argument("--metrics", nargs="+", choices=["Recall", "NDCG"], default=["Recall", "NDCG"])
-    parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
+    parser.add_argument("--metrics", nargs="+", choices=["ACC"], default=["ACC"])
 
     # log, save and result
-    parser.add_argument("--log_root_path", type=str, default="../log/")
-    parser.add_argument("--save_root_path", type=str, default="../save/")
-    parser.add_argument("--result_root_path", type=str, default="../result/")
+    parser.add_argument("--log_root_path", type=str, default="./log/")
+    parser.add_argument("--save_root_path", type=str, default="./save/")
+    parser.add_argument("--result_root_path", type=str, default="./result/")
     parser.add_argument(
         "--params_in_model_result", 
         nargs="+", 
         default=[
             "seed",
-            "d_model",
+            "d_model", 
+            "inner_dim",
             "dropout",
-            "n_horizontal_conv_per_h",
-            "n_vertical_conv",
-            "activation_conv",
-            "activation_fc",
+            "activation_fn",
+            "bn",
+            "token_sequence_field_agg_method",
             "loss_type",
 
             "epochs",
             "train_batch_size",
             "valid_batch_size",
             "test_batch_size",
-            "max_len",
             "lr",
             "weight_decay",
             "optimizer",
@@ -93,10 +89,7 @@ def parser_args():
             "early_stop_step",
 
             "time",
-            "Recall@5",
-            "NDCG@5",
-            "Recall@10",
-            "NDCG@10"
+            "ACC"
         ]
     )
     parser.add_argument(
@@ -104,13 +97,10 @@ def parser_args():
         nargs="+", 
         default=[
             "Model",
-            "Recall@5",
-            "NDCG@5",
-            "Recall@10",
-            "NDCG@10"
+            "ACC"
         ]
     )
-    parser.add_argument("--selected_best_model_metric", choices=["Recall@5", "NDCG@5", "Recall@10", "NDCG@10"], default="Recall@5")
+    parser.add_argument("--selected_best_model_metric", choices=["ACC"], default="ACC")
    
 
     return parser.parse_args()
@@ -131,12 +121,25 @@ def seed_worker(worker_id):
 def get_device(args):
     return torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
 
+def collate_fn(batch):
+    return {
+        "token_field_values": torch.stack([torch.tensor(item["token_field_values"]) for item in batch], dim=0),
+        "token_sequence_field_values": [
+            torch.stack(
+                [torch.tensor(item["token_sequence_field_values"][i]) for item in batch], 
+                dim=0
+            )
+            for i in range(len(batch[0]["token_sequence_field_values"]))
+        ],
+        "labels": torch.tensor([item["labels"] for item in batch])
+    }
+
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train"),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid"),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test")
+        "train": ConRecDataset(args.data_path, args.dataset, "train"),
+        "valid": ConRecDataset(args.data_path, args.dataset, "valid"),
+        "test": ConRecDataset(args.data_path, args.dataset, "test")
     }
 
     dataloaders = {
@@ -145,6 +148,7 @@ def initial_dataLoader(args):
             batch_size=args.train_batch_size, 
             shuffle=True,
             num_workers=args.num_workers,
+            collate_fn=collate_fn,
             worker_init_fn=seed_worker,
             pin_memory=True
         ),
@@ -153,6 +157,7 @@ def initial_dataLoader(args):
             batch_size=args.valid_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
+            collate_fn=collate_fn,
             worker_init_fn=seed_worker,
             pin_memory=True
         ),
@@ -161,24 +166,37 @@ def initial_dataLoader(args):
             batch_size=args.test_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
+            collate_fn=collate_fn,
             worker_init_fn=seed_worker,
             pin_memory=True
         )
     }
 
-    return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
+    return (
+        dataloaders["train"], 
+        dataloaders["valid"], 
+        dataloaders["test"], 
+        datasets["train"].num_items, 
+        datasets["train"].num_users,
+        datasets["train"].token_field_value_num_list,
+        datasets["train"].token_sequence_field_value_num_list
+    )
 
-def initial_model(args, device):
-    model = Caser(
-        args.num_items,
-        args.num_users,
+def initial_model(
+    args, 
+    token_field_value_num_list, 
+    token_sequence_field_value_num_list,
+    device
+):
+    model = DeepFM(
+        token_field_value_num_list,
+        token_sequence_field_value_num_list,
         args.d_model,
-        args.n_horizontal_conv_per_h,
-        args.n_vertical_conv,
-        args.max_len,
-        args.activation_conv,
-        args.dropout,
-        args.activation_fc,
+        args.inner_dim,
+        dropout=args.dropout,
+        activation_fn=args.activation_fn,
+        bn=args.bn,
+        token_sequence_field_agg_method=args.token_sequence_field_agg_method,
         loss_type=args.loss_type
     ).to(device)
 
@@ -234,7 +252,10 @@ def train_epoch(
     total_loss = []
     logger.log(f"Epoch [{epoch + 1}] - Start Training")
     for step, batch in enumerate(train_loader):
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else [item.to(device) for item in v]
+            for k, v in batch.items()
+        }
         loss = model(batch)
         optimizer.zero_grad()
         loss.backward()
@@ -270,7 +291,10 @@ def eval_epoch(
     total_loss = []
     logger.log(f"Epoch [{epoch + 1}] - Start Evaluating")
     for step, batch in enumerate(valid_loader):
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else [item.to(device) for item in v]
+            for k, v in batch.items()
+        }
         loss = model(batch)
         total_loss.append(loss.item())
     valid_metric = np.mean(total_loss)
@@ -291,39 +315,34 @@ def test(
     logger.log("Start Testing")
 
     result = {
-        metric: {k: [] for k in args.topk}
+        metric: 0
         for metric in args.metrics
     }
     data_num = 0
     for step, batch in enumerate(test_loader):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        scores = model.inference(batch)
-        _, indices = torch.topk(scores, max(args.topk), dim=-1, largest=True, sorted=True)
+        batch = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else [item.to(device) for item in v]
+            for k, v in batch.items()
+        }
+        scores = model.predict(batch)
+        labels = batch["labels"] 
         for metric in args.metrics:
-            if metric == "Recall":
-                for k in args.topk:
-                    result[metric][k].append(
-                        recall_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
-                    )
-            elif metric == "NDCG":
-                for k in args.topk:
-                    result[metric][k].append(
-                        ndcg_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
-                    )
+            if metric == "ACC":
+                acc = ((scores > 0.5).long() == labels).float().mean().item()
+                result[metric] += acc * batch["labels"].shape[0]
             else:
                 raise ValueError("Invalid metric.")
         data_num += batch["next_items"].shape[0]
     
     for metric in args.metrics:
-        for k in args.topk:
-            result[metric][k] = np.sum(result[metric][k]) / data_num
-            logger.log(f"{metric}@{k}: {result[metric][k]:.4f}")
+        result[metric] /= data_num
+        logger.log(f"{metric}: {result[metric]:.4f}")
     
 
     # save model result
     model_result_df = pd.read_csv(model_result_path)
     new_line = {k: v for k, v in args.__dict__.items() if k in args.params_in_model_result}
-    new_line.update({f"{metric}@{k}": v for metric, values in result.items() for k, v in values.items()})
+    new_line.update({f"{metric}": value for metric, value in result.items()})
     new_line_df = pd.DataFrame([new_line])
     if model_result_df.empty:
         model_result_df = new_line_df  # 直接赋值，避免 concat() 产生警告
@@ -342,12 +361,26 @@ def run():
     device = get_device(args)
 
     # initial dataLoader
-    train_loader, valid_loader, test_loader, num_items, num_users = initial_dataLoader(args)
+    (
+        train_loader, 
+        valid_loader, 
+        test_loader, 
+        num_items, 
+        num_users,
+        token_field_value_num_list,
+        token_sequence_field_value_num_list
+    ) = initial_dataLoader(args)
+
     args.num_items = num_items
     args.num_users = num_users
 
     # initial model
-    model = initial_model(args, device)
+    model = initial_model(
+        args, 
+        token_field_value_num_list, 
+        token_sequence_field_value_num_list,
+        device
+    )
 
     # initial optimizer and scheduler
     optimizer, scheduler = initial_optimizer_scheduler(args, model, len(train_loader))

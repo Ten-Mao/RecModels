@@ -9,9 +9,6 @@ import numpy as np
 import torch
 
 
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
 
 from data.dataset import SeqRecDataset
 from torch.utils.data import DataLoader
@@ -31,14 +28,14 @@ def parser_args():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     # data
-    parser.add_argument("--data_path", type=str, default="../data/")
+    parser.add_argument("--data_path", type=str, default="./data/")
     parser.add_argument("--dataset", choices=["Beauty2014", "Yelp"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
     parser.add_argument("--emb_dropout", type=float, default=0.1)
     parser.add_argument("--d_model", type=int, default=32)
-    parser.add_argument("--n_heads", type=int, default=2)
+    parser.add_argument("--n_heads", type=int, default=1)
     parser.add_argument("--attn_dropout", type=float, default=0.1)
     parser.add_argument("--inner_dim", type=int, default=32)
     parser.add_argument("--ffn_activation", choices=["relu", "gelu"], default="gelu")
@@ -49,7 +46,7 @@ def parser_args():
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--train_batch_size", type=int, default=1024)
+    parser.add_argument("--train_batch_size", type=int, default=256)
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
@@ -57,18 +54,18 @@ def parser_args():
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
-    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="cosine")
+    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
     parser.add_argument("--eval_step", type=int, default=1)
-    parser.add_argument("--early_stop_step", type=int, default=10)
+    parser.add_argument("--early_stop_step", type=int, default=20)
 
     # test
     parser.add_argument("--metrics", nargs="+", choices=["Recall", "NDCG"], default=["Recall", "NDCG"])
     parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
 
     # log, save and result
-    parser.add_argument("--log_root_path", type=str, default="../log/")
-    parser.add_argument("--save_root_path", type=str, default="../save/")
-    parser.add_argument("--result_root_path", type=str, default="../result/")
+    parser.add_argument("--log_root_path", type=str, default="./log/")
+    parser.add_argument("--save_root_path", type=str, default="./save/")
+    parser.add_argument("--result_root_path", type=str, default="./result/")
     parser.add_argument(
         "--params_in_model_result", 
         nargs="+", 

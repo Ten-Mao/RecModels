@@ -8,21 +8,16 @@ import time
 import numpy as np
 import torch
 
-
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-from data.dataset import GenRecDataset
+from data.dataset import SeqRecDataset
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
-from models.general_recommender.bpr import BPR
+from models.squencial_recommender.bert4rec import Bert4Rec
 from util.evaluate import ndcg_at_k, recall_at_k
 from util.logger import Logger
 from util.util import ensure_dir, ensure_file
 import pandas as pd
 
-MODEL_NAME="BPR"
+MODEL_NAME="Bert4Rec"
 
 def parser_args():
     parser = argparse.ArgumentParser(description=MODEL_NAME)
@@ -31,47 +26,67 @@ def parser_args():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     # data
-    parser.add_argument("--data_path", type=str, default="../data/")
+    parser.add_argument("--data_path", type=str, default="./data/")
     parser.add_argument("--dataset", choices=["Beauty2014", "Yelp"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
+    parser.add_argument("--emb_dropout", type=float, default=0.1)
     parser.add_argument("--d_model", type=int, default=32)
-    parser.add_argument("--loss_type", choices=["bpr"], default="bpr")
+    parser.add_argument("--n_heads", type=int, default=1)
+    parser.add_argument("--attn_dropout", type=float, default=0.1)
+    parser.add_argument("--inner_dim", type=int, default=32)
+    parser.add_argument("--ffn_activation", choices=["relu", "gelu"], default="gelu")
+    parser.add_argument("--ffn_dropout", type=float, default=0.1)
+    parser.add_argument("--eps", type=float, default=1e-12)
+    parser.add_argument("--num_layers", type=int, default=2)
+    parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--train_batch_size", type=int, default=1024)
+    parser.add_argument("--train_batch_size", type=int, default=256)
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
+    parser.add_argument("--max_len", type=int, default=20)
+    parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
-    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="cosine")
+    parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
     parser.add_argument("--eval_step", type=int, default=1)
-    parser.add_argument("--early_stop_step", type=int, default=10)
+    parser.add_argument("--early_stop_step", type=int, default=20)
 
     # test
     parser.add_argument("--metrics", nargs="+", choices=["Recall", "NDCG"], default=["Recall", "NDCG"])
     parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
 
     # log, save and result
-    parser.add_argument("--log_root_path", type=str, default="../log/")
-    parser.add_argument("--save_root_path", type=str, default="../save/")
-    parser.add_argument("--result_root_path", type=str, default="../result/")
+    parser.add_argument("--log_root_path", type=str, default="./log/")
+    parser.add_argument("--save_root_path", type=str, default="./save/")
+    parser.add_argument("--result_root_path", type=str, default="./result/")
     parser.add_argument(
         "--params_in_model_result", 
         nargs="+", 
         default=[
             "seed",
+            "emb_dropout", 
             "d_model", 
+            "n_heads", 
+            "attn_dropout", 
+            "inner_dim", 
+            "ffn_activation", 
+            "ffn_dropout", 
+            "eps", 
+            "num_layers", 
             "loss_type",
 
             "epochs",
             "train_batch_size",
             "valid_batch_size",
             "test_batch_size",
+            "max_len",
+            "mask_ratio",
             "lr",
             "weight_decay",
             "optimizer",
@@ -122,9 +137,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": GenRecDataset(args.data_path, args.dataset, "train"),
-        "valid": GenRecDataset(args.data_path, args.dataset, "valid"),
-        "test": GenRecDataset(args.data_path, args.dataset, "test")
+        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", mask_ratio=args.mask_ratio),
+        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", mask_ratio=args.mask_ratio),
+        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", mask_ratio=args.mask_ratio),
     }
 
     dataloaders = {
@@ -157,10 +172,18 @@ def initial_dataLoader(args):
     return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
-    model = BPR(
+    model = Bert4Rec(
         args.num_items,
-        args.num_users,
+        args.emb_dropout,
+        args.max_len,
         args.d_model,
+        args.n_heads,
+        args.attn_dropout,
+        args.inner_dim,
+        args.ffn_activation,
+        args.ffn_dropout,
+        args.eps,
+        args.num_layers,
         loss_type=args.loss_type
     ).to(device)
 
