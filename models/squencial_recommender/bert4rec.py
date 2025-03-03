@@ -142,7 +142,11 @@ class Bert4Rec(nn.Module):
         return x_pad, target_indices
 
     def forward(self, interactions):
-        # masked_his_seqs: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], mask_items: [batch_size, max_mask_len], mask_neg_items: [batch_size, max_mask_len]
+        # masked_his_seqs: [batch_size, seq_len], 
+        # mask_indices: [batch_size, max_mask_len], 
+        # mask_items: [batch_size, max_mask_len], 
+        # mask_neg_items: [batch_size, max_mask_len, neg_samples]
+
         masked_his_seqs = interactions["masked_his_seqs"].to(torch.long)
         mask_indices = interactions["mask_indices"].to(torch.long)
         mask_items = interactions["mask_items"].to(torch.long)
@@ -159,11 +163,12 @@ class Bert4Rec(nn.Module):
 
         if self.loss_type == "bpr":
             assert mask_neg_items is not None
-            pos_emb = self.item_emb(mask_items)
+            pred_emb = pred_emb.unsqueeze(-2)
+            pos_emb = self.item_emb(mask_items).unsqueeze(-2)
             neg_emb = self.item_emb(mask_neg_items)
-            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1)
+            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1).repeat(1, 1, neg_emb.shape[-1])
             neg_scores = torch.sum(pred_emb * neg_emb, dim=-1)
-            mask = (mask_items != self.pad_idx)
+            mask = (mask_items != self.pad_idx).unsqueeze(-1).repeat(1, 1, neg_emb.shape[-1])
             loss = self.loss_func(pos_scores, neg_scores, mask=mask)
         elif self.loss_type == "ce":
             scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]

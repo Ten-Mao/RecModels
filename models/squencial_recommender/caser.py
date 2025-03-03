@@ -113,7 +113,10 @@ class Caser(nn.Module):
         return final_emb
 
     def forward(self, interactions):
-        # his_seqs: [batch_size, seq_len], user_seqs: [batch_size], next_items: [batch_size], next_neg_items: [batch_size]
+        # his_seqs: [batch_size, seq_len], 
+        # user_seqs: [batch_size], 
+        # next_items: [batch_size], 
+        # next_neg_items: [batch_size, neg_samples]
         his_seqs = interactions["his_seqs"].to(torch.long)
         user_seqs = interactions["user_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
@@ -124,9 +127,10 @@ class Caser(nn.Module):
 
         if self.loss_type == "bpr":
             assert next_neg_items is not None
-            pos_emb = self.item_emb(next_items)
+            final_emb = final_emb.unsqueeze(1)
+            pos_emb = self.item_emb(next_items).unsqueeze(1)
             neg_emb = self.item_emb(next_neg_items)
-            pos_scores = torch.sum(final_emb * pos_emb, dim=-1)
+            pos_scores = torch.sum(final_emb * pos_emb, dim=-1).repeat(1, neg_emb.shape[1])
             neg_scores = torch.sum(final_emb * neg_emb, dim=-1)
             loss = self.loss_func(pos_scores, neg_scores)
         elif self.loss_type == "ce":

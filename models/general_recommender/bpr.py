@@ -42,7 +42,7 @@ class BPR(nn.Module):
             raise ValueError("Invalid loss type.")
     
     def forward(self, interactions):
-        # users: (batch_size), items: (batch_size), neg_items: (batch_size)
+        # users: (batch_size), items: (batch_size), neg_items: (batch_size, neg_samples)
         users = interactions["users"].to(torch.long)
         items = interactions["items"].to(torch.long)
         neg_items = interactions["neg_items"].to(torch.long)
@@ -51,7 +51,7 @@ class BPR(nn.Module):
         pos_emb = self.item_emb(items)
         neg_emb = self.item_emb(neg_items)
 
-        pos_scores = torch.sum(user_emb * pos_emb, dim=-1)
+        pos_scores = torch.sum(user_emb * pos_emb, dim=-1).unsqueeze(-1).repeat(1, neg_emb.shape[1])
         neg_scores = torch.sum(user_emb * neg_emb, dim=-1)
 
         loss = self.loss_func(pos_scores, neg_scores)

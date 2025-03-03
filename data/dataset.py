@@ -66,9 +66,13 @@ class SeqRecDataset(Dataset):
                     seq = seq + [0] * (self.max_len - len(seq))
                 else:
                     seq = seq[-self.max_len:]
-                neg_target = random.choice(range(self.num_items)) + 1
-                while neg_target == target:
+                
+                neg_targets = []
+                while len(neg_targets) < self.pair_num_per_pos:
                     neg_target = random.choice(range(self.num_items)) + 1
+                    while neg_target == target:
+                        neg_target = random.choice(range(self.num_items)) + 1
+                    neg_targets.append(neg_target)
 
                 # mask motivated data sample
                 seq_mask_motivated = items.copy()
@@ -76,22 +80,32 @@ class SeqRecDataset(Dataset):
                     seq_mask_motivated = seq_mask_motivated + [0] * (self.max_len - len(seq_mask_motivated))
                 else:
                     seq_mask_motivated = seq_mask_motivated[-self.max_len:]
+
                 mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+
                 masked_seq = seq_mask_motivated.copy()
                 for item in mask_seq_items_index:
                     masked_seq[item] = self.num_items + 1
+
                 mask_seq_items = []
                 for item in mask_seq_items_index:
                     mask_seq_items.append(seq_mask_motivated[item])
+                
                 neg_mask_seq_items = []
                 for item in mask_seq_items_index:
-                    neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
+                    neg_mask_seq_items_i = []
+                    while len(neg_mask_seq_items_i) < self.pair_num_per_pos:
+                        neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                        while neg_mask_seq_item == seq_mask_motivated[item]:
+                            neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                        neg_mask_seq_items_i.append(neg_mask_seq_item)
+                    neg_mask_seq_items.append(neg_mask_seq_items_i)
                 
                 sample = {
                     "user_seqs": np.array(user_id),
                     "his_seqs": np.array(seq),
                     "next_items": np.array(target),
-                    "next_neg_items": np.array(neg_target),
+                    "next_neg_items": np.array(neg_targets),
 
                     "masked_his_seqs": np.array(masked_seq),
                     "mask_indices": np.array(mask_seq_items_index),
@@ -114,9 +128,13 @@ class SeqRecDataset(Dataset):
                 seq = seq + [0] * (self.max_len - len(seq))
             else:
                 seq = seq[-self.max_len:]
-            neg_target = random.choice(range(self.num_items)) + 1
-            while neg_target == target:
+
+            neg_targets = []
+            while len(neg_targets) < self.pair_num_per_pos:
                 neg_target = random.choice(range(self.num_items)) + 1
+                while neg_target == target:
+                    neg_target = random.choice(range(self.num_items)) + 1
+                neg_targets.append(neg_target)
 
             # mask motivated data sample
             seq_mask_motivated = items.copy()
@@ -124,22 +142,32 @@ class SeqRecDataset(Dataset):
                 seq_mask_motivated = seq_mask_motivated + [0] * (self.max_len - len(seq_mask_motivated))
             else:
                 seq_mask_motivated = seq_mask_motivated[-self.max_len:]
+
             mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+
             masked_seq = seq_mask_motivated.copy()
             for item in mask_seq_items_index:
                 masked_seq[item] = self.num_items + 1
+
             mask_seq_items = []
             for item in mask_seq_items_index:
                 mask_seq_items.append(seq_mask_motivated[item])
+
             neg_mask_seq_items = []
             for item in mask_seq_items_index:
-                neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
+                neg_mask_seq_items_i = []
+                while len(neg_mask_seq_items_i) < self.pair_num_per_pos:
+                    neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                    while neg_mask_seq_item == seq_mask_motivated[item]:
+                        neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                    neg_mask_seq_items_i.append(neg_mask_seq_item)
+                neg_mask_seq_items.append(neg_mask_seq_items_i)
 
             sample = {
                 "user_seqs": np.array(user_id),
                 "his_seqs": np.array(seq),
                 "next_items": np.array(target),
-                "next_neg_items": np.array(neg_target),
+                "next_neg_items": np.array(neg_targets),
 
                 "masked_his_seqs": np.array(masked_seq),
                 "mask_indices": np.array(mask_seq_items_index),
@@ -161,9 +189,13 @@ class SeqRecDataset(Dataset):
                 seq = seq + [0] * (self.max_len - len(seq))
             else:
                 seq = seq[-self.max_len:]
-            neg_target = random.choice(range(self.num_items)) + 1
-            while neg_target == target:
+
+            neg_targets = []
+            while len(neg_targets) < self.pair_num_per_pos:
                 neg_target = random.choice(range(self.num_items)) + 1
+                while neg_target == target:
+                    neg_target = random.choice(range(self.num_items)) + 1
+                neg_targets.append(neg_target)
 
             # mask motivated data sample
             seq_mask_motivated = items.copy()
@@ -171,22 +203,32 @@ class SeqRecDataset(Dataset):
                 seq_mask_motivated = seq_mask_motivated + [0] * (self.max_len - len(seq_mask_motivated))
             else:
                 seq_mask_motivated = seq_mask_motivated[-self.max_len:]
+
             mask_seq_items_index = random.sample(range(self.max_len), self.max_mask_len)
+
             masked_seq = seq_mask_motivated.copy()
             for item in mask_seq_items_index:
                 masked_seq[item] = self.num_items + 1
+
             mask_seq_items = []
             for item in mask_seq_items_index:
                 mask_seq_items.append(seq_mask_motivated[item])
+
             neg_mask_seq_items = []
             for item in mask_seq_items_index:
-                neg_mask_seq_items.append(random.choice(range(self.num_items)) + 1)
+                neg_mask_seq_items_i = []
+                while len(neg_mask_seq_items_i) < self.pair_num_per_pos:
+                    neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                    while neg_mask_seq_item == seq_mask_motivated[item]:
+                        neg_mask_seq_item = random.choice(range(self.num_items)) + 1
+                    neg_mask_seq_items_i.append(neg_mask_seq_item)
+                neg_mask_seq_items.append(neg_mask_seq_items_i)
 
             sample = {
                 "user_seqs": np.array(user_id),
                 "his_seqs": np.array(seq),
                 "next_items": np.array(target),
-                "next_neg_items": np.array(neg_target),
+                "next_neg_items": np.array(neg_targets),
 
                 "masked_his_seqs": np.array(masked_seq),
                 "mask_indices": np.array(mask_seq_items_index),
@@ -203,10 +245,11 @@ class SeqRecDataset(Dataset):
         return len(self.inters)
 
 class GenRecDataset(Dataset):
-    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"]):
+    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"], pair_num_per_pos=100):
         self.data_root_path = data_root_path
         self.dataset = dataset
         self.mode = mode
+        self.pair_num_per_pos = pair_num_per_pos
 
         self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.csv")
         assert os.path.exists(self.inter_path), f"Inter file not found in {self.inter_path}"
@@ -246,13 +289,17 @@ class GenRecDataset(Dataset):
         for user_id, items in self.inters.items():
             train_items = items[:-2]
             for item in train_items:
-                neg_item = random.choice(range(self.num_items))
-                while neg_item in items:
+                neg_items = []
+                while len(neg_items) < self.pair_num_per_pos:
                     neg_item = random.choice(range(self.num_items))
+                    while neg_item in items:
+                        neg_item = random.choice(range(self.num_items))
+                    neg_items.append(neg_item)
+
                 sample = {
                     "users": np.array(user_id),
                     "items": np.array(item),
-                    "neg_items": np.array(neg_item)
+                    "neg_items": np.array(neg_items)
                 }
                 inter_data.append(sample)
         return inter_data
@@ -261,15 +308,17 @@ class GenRecDataset(Dataset):
         inter_data = []
         for user_id, items in self.inters.items():
             item = items[-2]
-
-            neg_item = random.choice(range(self.num_items))
-            while neg_item in items:
+            neg_items = []
+            while len(neg_items) < self.pair_num_per_pos:
                 neg_item = random.choice(range(self.num_items))
+                while neg_item in items:
+                    neg_item = random.choice(range(self.num_items))
+                neg_items.append(neg_item)
 
             sample = {
                 "users": np.array(user_id),
                 "items": np.array(item),
-                "neg_items": np.array(neg_item)
+                "neg_items": np.array(neg_items)
             }
             inter_data.append(sample)
         return inter_data
@@ -278,15 +327,17 @@ class GenRecDataset(Dataset):
         inter_data = []
         for user_id, items in self.inters.items():
             item = items[-1]
-
-            neg_item = random.choice(range(self.num_items))
-            while neg_item in items:
+            neg_items = []
+            while len(neg_items) < self.pair_num_per_pos:
                 neg_item = random.choice(range(self.num_items))
-                
+                while neg_item in items:
+                    neg_item = random.choice(range(self.num_items))
+                neg_items.append(neg_item)
+
             sample = {
                 "users": np.array(user_id),
                 "items": np.array(item),
-                "neg_items": np.array(neg_item)
+                "neg_items": np.array(neg_items)
             }
             inter_data.append(sample)
         return inter_data

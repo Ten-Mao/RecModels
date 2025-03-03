@@ -77,7 +77,7 @@ class Gru4Rec(nn.Module):
         return torch.stack(res, dim=0)
     
     def forward(self, interactions):
-        # his_seqs: (batch_size, seq_len), next_items: (batch_size), next_neg_items: (batch_size)
+        # his_seqs: (batch_size, seq_len), next_items: (batch_size), next_neg_items: (batch_size, neg_samples)
         his_seqs = interactions["his_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
         next_neg_items = interactions.get("next_neg_items", None)
@@ -89,9 +89,10 @@ class Gru4Rec(nn.Module):
 
         if self.loss_type == "bpr":
             assert next_neg_items is not None
-            pos_emb = self.item_emb(next_items)
+            target_emb = target_emb.unsqueeze(1)
+            pos_emb = self.item_emb(next_items).unsqueeze(1)
             neg_emb = self.item_emb(next_neg_items)
-            pos_scores = torch.sum(target_emb * pos_emb, dim=-1)
+            pos_scores = torch.sum(target_emb * pos_emb, dim=-1).repeat(1, next_neg_items.shape[1])
             neg_scores = torch.sum(target_emb * neg_emb, dim=-1)
             loss = self.loss_func(pos_scores, neg_scores)
         elif self.loss_type == "ce":
