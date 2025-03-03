@@ -34,13 +34,13 @@ def parser_args():
 
     # model
     parser.add_argument("--emb_dropout", type=float, default=0.1)
-    parser.add_argument("--d_model", type=int, default=32)
+    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--n_heads", type=int, default=1)
     parser.add_argument("--attn_dropout", type=float, default=0.1)
-    parser.add_argument("--inner_dim", type=int, default=32)
-    parser.add_argument("--ffn_activation", choices=["relu", "gelu"], default="gelu")
+    parser.add_argument("--inner_dim", type=int, default=128)
+    parser.add_argument("--ffn_activation", choices=["relu", "gelu"], default="relu")
     parser.add_argument("--ffn_dropout", type=float, default=0.1)
-    parser.add_argument("--eps", type=float, default=1e-12)
+    parser.add_argument("--eps", type=float, default=1e-8)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 

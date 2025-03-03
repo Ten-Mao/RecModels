@@ -50,7 +50,7 @@ class Bert4Rec(nn.Module):
 
         # Embedding Layer
         self.item_emb = nn.Embedding(n_items + 2, d_model, padding_idx=pad_idx) # zero for padding and last for [MASK]
-        self.pos_emb = nn.Embedding(max_len, d_model)
+        self.pos_emb = nn.Embedding(max_len + 1, d_model) # last for injecting target item in the inference phase
 
         # Transformer Layer
         self.emb_dropout = nn.Dropout(emb_dropout)
@@ -150,9 +150,10 @@ class Bert4Rec(nn.Module):
         if mask_neg_items is not None:
             mask_neg_items = mask_neg_items.to(torch.long)
 
-        mask_onehot = F.one_hot(mask_indices.reshape(-1), num_classes=masked_his_seqs.shape[1])
-        mask_onehot = mask_onehot.reshape(mask_indices.shape[0], mask_indices.shape[1], -1)
         his_emb = self.encode_seqs(masked_his_seqs)
+
+        mask_onehot = F.one_hot(mask_indices.reshape(-1), num_classes=masked_his_seqs.shape[1]).to(his_emb.dtype)
+        mask_onehot = mask_onehot.reshape(mask_indices.shape[0], mask_indices.shape[1], -1)
         # mask_onehot: [batch_size, max_mask_len, seq_len] -> [batch_size, max_mask_len, d_model]
         pred_emb = mask_onehot @ his_emb 
 
@@ -166,7 +167,9 @@ class Bert4Rec(nn.Module):
             loss = self.loss_func(pos_scores, neg_scores, mask=mask)
         elif self.loss_type == "ce":
             scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]
-            loss = self.loss_func(scores, mask_items - 1, ignore_index=self.pad_idx)
+            scores = scores.reshape(-1, self.n_items)
+            mask_items = mask_items.reshape(-1)
+            loss = self.loss_func(scores, mask_items - 1, ignore_index=self.pad_idx - 1)
         else:
             raise ValueError("Invalid loss type.")
 

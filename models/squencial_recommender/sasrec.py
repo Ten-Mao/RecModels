@@ -155,7 +155,7 @@ class SASRec(nn.Module):
         # his_seqs: [batch_size, seq_len]
         his_seqs = interactions["his_seqs"].to(torch.long)
 
-        target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         scores = target_emb @ self.item_emb.weight[1:].t()
@@ -165,7 +165,7 @@ class SASRec(nn.Module):
         # his_seqs: [batch_size, seq_len], test_items: [batch_size]
         his_seqs = interactions["his_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
-        target_indices = (his_seqs == self.pad_idx).sum(dim=-1) - 1
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
         test_emb = self.item_emb(test_items)
