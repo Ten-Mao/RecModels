@@ -69,6 +69,7 @@ class Gru4Rec(nn.Module):
         return x
     
     def extract(self, his_emb, target_indices):
+        # his_emb: (batch_size, seq_len, d_model), target_indices: (batch_size)
         assert his_emb.shape[0] == target_indices.shape[0]
         res = []
         for i in range(his_emb.shape[0]):
@@ -104,7 +105,7 @@ class Gru4Rec(nn.Module):
         # his_seqs: (batch_size, seq_len)
         his_seqs = interactions["his_seqs"]
         his_emb = self.encode_seqs(his_seqs)
-        target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         target_emb = self.extract(his_emb, target_indices)
 
         scores = target_emb @ self.item_emb.weight[1:].t()
@@ -116,7 +117,7 @@ class Gru4Rec(nn.Module):
         test_items = interactions["test_items"].to(torch.long)
         
         his_emb = self.encode_seqs(his_seqs)
-        target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         target_emb = self.extract(his_emb, target_indices)
         test_emb = self.item_emb(test_items)
         scores = torch.sum(target_emb * test_emb, dim=-1)

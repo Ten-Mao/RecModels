@@ -1,2 +1,2 @@
 # run sasrec
-nohup python -u run_sasrec.py > exception.log 2>&1 &
+nohup python -u run_gru4rec.py > exception.log 2>&1 &

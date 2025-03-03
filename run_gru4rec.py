@@ -32,9 +32,9 @@ def parser_args():
 
     # model
     parser.add_argument("--emb_dropout", type=float, default=0.1)
-    parser.add_argument("--d_model", type=int, default=32)
+    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--inner_dim", type=int, default=32)
+    parser.add_argument("--inner_dim", type=int, default=256)
     parser.add_argument("--num_layers", type=int, default=2)
     parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 
@@ -274,7 +274,6 @@ def test(
     device,
     logger,
     args,
-    model_result_path,
 ):
     model.eval()
     logger.log("Start Testing")
@@ -309,6 +308,10 @@ def test(
             logger.log(f"{metric}@{k}: {result[metric][k]:.4f}")
     
 
+    return result
+    
+
+def save_test_result(result, args, model_result_path):
     # save model result
     model_result_df = pd.read_csv(model_result_path)
     new_line = {k: v for k, v in args.__dict__.items() if k in args.params_in_model_result}
@@ -377,6 +380,7 @@ def run():
             train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
             if epoch % args.eval_step == 0:
                 valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
+                test(model, test_loader, device, logger, args)
                 if valid_metric < best_valid_metric:
                     patience = 0
                     best_valid_metric = valid_metric
@@ -393,7 +397,8 @@ def run():
         
         # test
         model.load_state_dict(torch.load(save_file_path, weights_only=True))
-        test(model, test_loader, device, logger, args, model_result_file_path)
+        test_metric = test(model, test_loader, device, logger, args)
+        save_test_result(test_metric, args, model_result_file_path)
     except BaseException as e:
         logger.log(f"Error: {e}")
         exit(1)

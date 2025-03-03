@@ -293,7 +293,6 @@ def test(
     device,
     logger,
     args,
-    model_result_path,
 ):
     model.eval()
     logger.log("Start Testing")
@@ -323,10 +322,14 @@ def test(
         logger.log(f"{metric}: {result[metric]:.4f}")
     
 
+    return result
+    
+
+def save_test_result(result, args, model_result_path):
     # save model result
     model_result_df = pd.read_csv(model_result_path)
     new_line = {k: v for k, v in args.__dict__.items() if k in args.params_in_model_result}
-    new_line.update({f"{metric}": value for metric, value in result.items()})
+    new_line.update({f"{metric}@{k}": v for metric, values in result.items() for k, v in values.items()})
     new_line_df = pd.DataFrame([new_line])
     if model_result_df.empty:
         model_result_df = new_line_df  # 直接赋值，避免 concat() 产生警告
@@ -405,6 +408,7 @@ def run():
             train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
             if epoch % args.eval_step == 0:
                 valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
+                test(model, test_loader, device, logger, args)
                 if valid_metric < best_valid_metric:
                     patience = 0
                     best_valid_metric = valid_metric
@@ -421,7 +425,8 @@ def run():
         
         # test
         model.load_state_dict(torch.load(save_file_path, weights_only=True))
-        test(model, test_loader, device, logger, args, model_result_file_path)
+        test_metric = test(model, test_loader, device, logger, args)
+        save_test_result(test_metric, args, model_result_file_path)
     except BaseException as e:
         logger.log(f"Error: {e}")
         exit(1)
