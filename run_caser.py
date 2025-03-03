@@ -46,6 +46,7 @@ def parser_args():
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
+    parser.add_argument("--pair_num_per_pos", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
@@ -80,6 +81,7 @@ def parser_args():
             "valid_batch_size",
             "test_batch_size",
             "max_len",
+            "pair_num_per_pos",
             "lr",
             "weight_decay",
             "optimizer",
@@ -130,9 +132,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train"),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid"),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test")
+        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", args.pair_num_per_pos),
+        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", args.pair_num_per_pos),
+        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", args.pair_num_per_pos)
     }
 
     dataloaders = {

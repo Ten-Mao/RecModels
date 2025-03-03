@@ -41,6 +41,7 @@ def parser_args():
     parser.add_argument("--train_batch_size", type=int, default=256)
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
+    parser.add_argument("--pair_num_per_pos", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
@@ -71,6 +72,7 @@ def parser_args():
             "train_batch_size",
             "valid_batch_size",
             "test_batch_size",
+            "pair_num_per_pos",
             "lr",
             "weight_decay",
             "optimizer",
@@ -121,9 +123,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": GenRecDataset(args.data_path, args.dataset, "train"),
-        "valid": GenRecDataset(args.data_path, args.dataset, "valid"),
-        "test": GenRecDataset(args.data_path, args.dataset, "test")
+        "train": GenRecDataset(args.data_path, args.dataset, "train", args.pair_num_per_pos),
+        "valid": GenRecDataset(args.data_path, args.dataset, "valid", args.pair_num_per_pos),
+        "test": GenRecDataset(args.data_path, args.dataset, "test", args.pair_num_per_pos)
     }
 
     dataloaders = {

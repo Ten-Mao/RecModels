@@ -40,7 +40,7 @@ def parser_args():
     parser.add_argument("--ffn_dropout", type=float, default=0.1)
     parser.add_argument("--eps", type=float, default=1e-12)
     parser.add_argument("--num_layers", type=int, default=2)
-    parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
+    parser.add_argument("--loss_type", choices=["bpr", "ce"], default="bpr")
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
@@ -48,6 +48,7 @@ def parser_args():
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
+    parser.add_argument("--pair_num_per_pos", type=int, default=100)
     parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
@@ -86,6 +87,7 @@ def parser_args():
             "valid_batch_size",
             "test_batch_size",
             "max_len",
+            "pair_num_per_pos",
             "mask_ratio",
             "lr",
             "weight_decay",
@@ -137,9 +139,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", mask_ratio=args.mask_ratio),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", mask_ratio=args.mask_ratio),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", mask_ratio=args.mask_ratio),
+        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", mask_ratio=args.mask_ratio, pair_num_per_pos=args.pair_num_per_pos),
+        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", mask_ratio=args.mask_ratio, pair_num_per_pos=args.pair_num_per_pos),
+        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", mask_ratio=args.mask_ratio, pair_num_per_pos=args.pair_num_per_pos),
     }
 
     dataloaders = {

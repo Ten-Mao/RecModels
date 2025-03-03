@@ -51,8 +51,8 @@ class BPR(nn.Module):
         pos_emb = self.item_emb(items)
         neg_emb = self.item_emb(neg_items)
 
-        pos_scores = torch.sum(user_emb * pos_emb, dim=-1).unsqueeze(-1).repeat(1, neg_emb.shape[1])
-        neg_scores = torch.sum(user_emb * neg_emb, dim=-1)
+        pos_scores = torch.sum(user_emb * pos_emb, dim=-1).unsqueeze(-1).repeat(1, neg_emb.shape[1]) # [batch_size, neg_samples]
+        neg_scores = torch.sum(user_emb * neg_emb, dim=-1) # [batch_size, neg_samples]
 
         loss = self.loss_func(pos_scores, neg_scores)
 

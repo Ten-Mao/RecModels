@@ -8,9 +8,18 @@ from torch.utils.data import Dataset
 import numpy as np
 import random
 
+from tqdm import tqdm
+
 class SeqRecDataset(Dataset):
 
-    def __init__(self, data_root_path, dataset, max_len, mode:Literal["train", "valid", "test"], mask_ratio=0.15, pair_num_per_pos=100):
+    def __init__(self, 
+        data_root_path, 
+        dataset, 
+        max_len, 
+        mode:Literal["train", "valid", "test"], 
+        mask_ratio=0.15, 
+        pair_num_per_pos=100
+    ):
         self.data_root_path = data_root_path
         self.dataset = dataset
         self.max_len = max_len
@@ -55,7 +64,7 @@ class SeqRecDataset(Dataset):
 
     def _process_train_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             items = items[:-2]
             items = [item + 1 for item in items] # 0 for padding
             for i in range(1, len(items)):
@@ -117,7 +126,7 @@ class SeqRecDataset(Dataset):
     
     def _process_valid_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             items = items[:-1]
             items = [item + 1 for item in items]
 
@@ -179,7 +188,7 @@ class SeqRecDataset(Dataset):
     
     def _process_test_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             items = [item + 1 for item in items]
 
             # normal data sample
@@ -245,7 +254,12 @@ class SeqRecDataset(Dataset):
         return len(self.inters)
 
 class GenRecDataset(Dataset):
-    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"], pair_num_per_pos=100):
+    def __init__(self, 
+        data_root_path, 
+        dataset, 
+        mode:Literal["train", "valid", "test"], 
+        pair_num_per_pos=100
+    ):
         self.data_root_path = data_root_path
         self.dataset = dataset
         self.mode = mode
@@ -286,7 +300,7 @@ class GenRecDataset(Dataset):
     
     def _process_train_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             train_items = items[:-2]
             for item in train_items:
                 neg_items = []
@@ -306,7 +320,7 @@ class GenRecDataset(Dataset):
 
     def _process_valid_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             item = items[-2]
             neg_items = []
             while len(neg_items) < self.pair_num_per_pos:
@@ -325,7 +339,7 @@ class GenRecDataset(Dataset):
 
     def _process_test_data(self):
         inter_data = []
-        for user_id, items in self.inters.items():
+        for user_id, items in tqdm(self.inters.items()):
             item = items[-1]
             neg_items = []
             while len(neg_items) < self.pair_num_per_pos:
@@ -363,7 +377,11 @@ class GenRecDataset(Dataset):
         return adj_matrix
 
 class ConRecDataset(Dataset):
-    def __init__(self, data_root_path, dataset, mode:Literal["train", "valid", "test"]):
+    def __init__(self, 
+        data_root_path, 
+        dataset, 
+        mode:Literal["train", "valid", "test"]
+    ):
         self.data_root_path = data_root_path
         self.dataset = dataset
         self.mode = mode

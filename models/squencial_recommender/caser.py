@@ -127,11 +127,11 @@ class Caser(nn.Module):
 
         if self.loss_type == "bpr":
             assert next_neg_items is not None
-            final_emb = final_emb.unsqueeze(1)
-            pos_emb = self.item_emb(next_items).unsqueeze(1)
-            neg_emb = self.item_emb(next_neg_items)
-            pos_scores = torch.sum(final_emb * pos_emb, dim=-1).repeat(1, neg_emb.shape[1])
-            neg_scores = torch.sum(final_emb * neg_emb, dim=-1)
+            final_emb = final_emb.unsqueeze(1)   # [batch_size, 1, d_model]
+            pos_emb = self.item_emb(next_items).unsqueeze(1)    # [batch_size, 1, d_model]
+            neg_emb = self.item_emb(next_neg_items) # [batch_size, neg_samples, d_model]
+            pos_scores = torch.sum(final_emb * pos_emb, dim=-1).repeat(1, neg_emb.shape[1]) # [batch_size, neg_samples]
+            neg_scores = torch.sum(final_emb * neg_emb, dim=-1) # [batch_size, neg_samples]
             loss = self.loss_func(pos_scores, neg_scores)
         elif self.loss_type == "ce":
             scores = final_emb @ self.item_emb.weight[1:].t()

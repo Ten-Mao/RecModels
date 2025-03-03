@@ -163,12 +163,12 @@ class Bert4Rec(nn.Module):
 
         if self.loss_type == "bpr":
             assert mask_neg_items is not None
-            pred_emb = pred_emb.unsqueeze(-2)
-            pos_emb = self.item_emb(mask_items).unsqueeze(-2)
-            neg_emb = self.item_emb(mask_neg_items)
-            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1).repeat(1, 1, neg_emb.shape[-1])
-            neg_scores = torch.sum(pred_emb * neg_emb, dim=-1)
-            mask = (mask_items != self.pad_idx).unsqueeze(-1).repeat(1, 1, neg_emb.shape[-1])
+            pred_emb = pred_emb.unsqueeze(-2) # [batch_size, max_mask_len, 1, d_model]
+            pos_emb = self.item_emb(mask_items).unsqueeze(-2) # [batch_size, max_mask_len, 1, d_model]
+            neg_emb = self.item_emb(mask_neg_items) # [batch_size, max_mask_len, neg_samples, d_model]
+            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1).repeat(1, 1, neg_emb.shape[-2]) # [batch_size, max_mask_len, neg_samples]
+            neg_scores = torch.sum(pred_emb * neg_emb, dim=-1) # [batch_size, max_mask_len, neg_samples]
+            mask = (mask_items != self.pad_idx).unsqueeze(-1).repeat(1, 1, neg_emb.shape[-2]) # [batch_size, max_mask_len, neg_samples]
             loss = self.loss_func(pos_scores, neg_scores, mask=mask)
         elif self.loss_type == "ce":
             scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]

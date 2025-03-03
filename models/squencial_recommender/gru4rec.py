@@ -89,11 +89,11 @@ class Gru4Rec(nn.Module):
 
         if self.loss_type == "bpr":
             assert next_neg_items is not None
-            target_emb = target_emb.unsqueeze(1)
-            pos_emb = self.item_emb(next_items).unsqueeze(1)
-            neg_emb = self.item_emb(next_neg_items)
-            pos_scores = torch.sum(target_emb * pos_emb, dim=-1).repeat(1, next_neg_items.shape[1])
-            neg_scores = torch.sum(target_emb * neg_emb, dim=-1)
+            target_emb = target_emb.unsqueeze(1)    # (batch_size, 1, d_model)
+            pos_emb = self.item_emb(next_items).unsqueeze(1)   # (batch_size, 1, d_model)
+            neg_emb = self.item_emb(next_neg_items)  # (batch_size, neg_samples, d_model)
+            pos_scores = torch.sum(target_emb * pos_emb, dim=-1).repeat(1, next_neg_items.shape[1]) # (batch_size, neg_samples)
+            neg_scores = torch.sum(target_emb * neg_emb, dim=-1) # (batch_size, neg_samples)
             loss = self.loss_func(pos_scores, neg_scores)
         elif self.loss_type == "ce":
             scores = target_emb @ self.item_emb.weight[1:].t()
