@@ -143,8 +143,8 @@ class Bert4Rec(nn.Module):
 
     def forward(self, interactions):
         # masked_his_seqs: [batch_size, seq_len], mask_indices: [batch_size, max_mask_len], mask_items: [batch_size, max_mask_len], mask_neg_items: [batch_size, max_mask_len]
-        masked_his_seqs = interactions["masked_his_seqs"]
-        mask_indices = interactions["mask_indices"]
+        masked_his_seqs = interactions["masked_his_seqs"].to(torch.long)
+        mask_indices = interactions["mask_indices"].to(torch.long)
         mask_items = interactions["mask_items"].to(torch.long)
         mask_neg_items = interactions.get("mask_neg_items", None)
         if mask_neg_items is not None:
@@ -174,7 +174,7 @@ class Bert4Rec(nn.Module):
     
     def inference(self, interactions):
         # his_seqs: [batch_size, seq_len]
-        his_seqs = interactions["his_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
         his_seqs, target_indices = self.inject(his_seqs)
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
@@ -183,7 +183,7 @@ class Bert4Rec(nn.Module):
     
     def predict(self, interactions):
         # his_seqs: [batch_size, seq_len], test_items: [batch_size]
-        his_seqs = interactions["his_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
 
         his_seqs, target_indices = self.inject(his_seqs)

@@ -117,8 +117,8 @@ class HGN(nn.Module):
 
     def forward(self, interactions):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size), next_items: (batch_size), next_neg_items: (batch_size)
-        his_seqs = interactions["his_seqs"]
-        user_seqs = interactions["user_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
+        user_seqs = interactions["user_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
         next_neg_items = interactions.get("next_neg_items", None)
         if next_neg_items is not None:
@@ -140,8 +140,8 @@ class HGN(nn.Module):
     
     def inference(self, interactions):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size)
-        his_seqs = interactions["his_seqs"]
-        user_seqs = interactions["user_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
+        user_seqs = interactions["user_seqs"].to(torch.long)
 
         final_emb = self.encode_seqs(his_seqs, user_seqs)
         scores = final_emb @ self.item_emb.weight[1:].t()
@@ -149,8 +149,8 @@ class HGN(nn.Module):
     
     def predict(self, interactions):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size), test_items: (batch_size)
-        his_seqs = interactions["his_seqs"]
-        user_seqs = interactions["user_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
+        user_seqs = interactions["user_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
         
         final_emb = self.encode_seqs(his_seqs, user_seqs)

@@ -78,7 +78,7 @@ class Gru4Rec(nn.Module):
     
     def forward(self, interactions):
         # his_seqs: (batch_size, seq_len), next_items: (batch_size), next_neg_items: (batch_size)
-        his_seqs = interactions["his_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
         next_neg_items = interactions.get("next_neg_items", None)
         if next_neg_items is not None:
@@ -103,7 +103,7 @@ class Gru4Rec(nn.Module):
     
     def inference(self, interactions):
         # his_seqs: (batch_size, seq_len)
-        his_seqs = interactions["his_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
         his_emb = self.encode_seqs(his_seqs)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         target_emb = self.extract(his_emb, target_indices)
@@ -113,7 +113,7 @@ class Gru4Rec(nn.Module):
     
     def predict(self, interactions):
         # his_seqs: (batch_size, seq_len), test_items: (batch_size)
-        his_seqs = interactions["his_seqs"]
+        his_seqs = interactions["his_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
         
         his_emb = self.encode_seqs(his_seqs)
