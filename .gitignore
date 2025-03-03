@@ -5,4 +5,4 @@
 *.log
 *.pth
 
-!result/**/*
+# !result/**/*
