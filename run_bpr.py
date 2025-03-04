@@ -281,16 +281,16 @@ def test(
             if metric == "Recall":
                 for k in args.topk:
                     result[metric][k].append(
-                        recall_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
+                        recall_at_k(indices, batch["items"], k) * batch["items"].shape[0]
                     )
             elif metric == "NDCG":
                 for k in args.topk:
                     result[metric][k].append(
-                        ndcg_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
+                        ndcg_at_k(indices, batch["items"], k) * batch["items"].shape[0]
                     )
             else:
                 raise ValueError("Invalid metric.")
-        data_num += batch["next_items"].shape[0]
+        data_num += batch["items"].shape[0]
     
     for metric in args.metrics:
         for k in args.topk:

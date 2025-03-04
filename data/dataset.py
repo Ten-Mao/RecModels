@@ -10,6 +10,8 @@ import random
 
 from tqdm import tqdm
 
+from util.util import ensure_dir
+
 class SeqRecDataset(Dataset):
 
     def __init__(self, 
@@ -18,7 +20,8 @@ class SeqRecDataset(Dataset):
         max_len, 
         mode:Literal["train", "valid", "test"], 
         mask_ratio=0.15, 
-        pair_num_per_pos=100
+        pair_num_per_pos=100,
+        seed=1024,
     ):
         self.data_root_path = data_root_path
         self.dataset = dataset
@@ -35,13 +38,23 @@ class SeqRecDataset(Dataset):
         self.num_items = self.get_item_num()
         self.num_users = self.get_user_num()
 
+        self.cache_dir_path = os.path.join(data_root_path, dataset, "cache/SeqRecDataset")
+        ensure_dir(self.cache_dir_path)
+
+        self.cache_file_path = os.path.join(data_root_path, dataset, f"cache/SeqRecDataset/{seed}-{max_len}-{mask_ratio}-{pair_num_per_pos}-{mode}.npy")
+        if os.path.exists(self.cache_path):
+            self.inter_data = np.load(self.cache_file_path, allow_pickle=True)
+            return
 
         if self.mode == "train":
             self.inter_data = self._process_train_data()
+            np.save(self.cache_file_path, self.inter_data)
         elif self.mode == "valid":
             self.inter_data = self._process_valid_data()
+            np.save(self.cache_file_path, self.inter_data)
         elif self.mode == "test":
             self.inter_data = self._process_test_data()
+            np.save(self.cache_file_path, self.inter_data)
     
     def __len__(self):
         _len = len(self.inter_data)
@@ -258,7 +271,8 @@ class GenRecDataset(Dataset):
         data_root_path, 
         dataset, 
         mode:Literal["train", "valid", "test"], 
-        pair_num_per_pos=100
+        pair_num_per_pos=100,
+        seed=1024
     ):
         self.data_root_path = data_root_path
         self.dataset = dataset
@@ -272,12 +286,23 @@ class GenRecDataset(Dataset):
         self.num_items = self.get_item_num()
         self.num_users = self.get_user_num()
 
+        self.cache_dir_path = os.path.join(data_root_path, dataset, "cache/GenRecDataset")
+        ensure_dir(self.cache_dir_path)
+
+        self.cache_file_path = os.path.join(data_root_path, dataset, f"cache/GenRecDataset/{seed}-{pair_num_per_pos}-{mode}.npy")
+        if os.path.exists(self.cache_path):
+            self.inter_data = np.load(self.cache_file_path, allow_pickle=True)
+            return
+        
         if self.mode == "train":
             self.inter_data = self._process_train_data()
+            np.save(self.cache_file_path, self.inter_data)
         elif self.mode == "valid":
             self.inter_data = self._process_valid_data()
+            np.save(self.cache_file_path, self.inter_data)
         elif self.mode == "test":
             self.inter_data = self._process_test_data()
+            np.save(self.cache_file_path, self.inter_data)
 
     def __len__(self):
         _len = len(self.inter_data)
@@ -357,7 +382,7 @@ class GenRecDataset(Dataset):
         return inter_data
 
     def get_item_num(self):
-        return max([max(items) for items in self.inters.values ]) + 1
+        return max([max(items) for items in self.inters.values() ]) + 1
 
     def get_user_num(self):
         return len(self.inters)

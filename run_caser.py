@@ -132,9 +132,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", args.pair_num_per_pos),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", args.pair_num_per_pos),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", args.pair_num_per_pos)
+        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", pair_num_per_pos=args.pair_num_per_pos),
+        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", pair_num_per_pos=args.pair_num_per_pos),
+        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", pair_num_per_pos=args.pair_num_per_pos)
     }
 
     dataloaders = {

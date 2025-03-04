@@ -82,13 +82,15 @@ class HGN(nn.Module):
         return item_emb * gate
  
     def padding_pool(self, gated_emb, padding_mask):
-        # gated_emb: (batch_size, d_model, max_len), padding_mask: (batch_size, max_len, 1)
+        # gated_emb: (batch_size, max_len, d_model), padding_mask: (batch_size, max_len, 1)
         if self.pool_type == "max":
-            gated_emb = torch.where(padding_mask, gated_emb.permute(0, 2, 1), torch.tensor(-float("inf")).to(gated_emb.device))
+            gated_emb = gated_emb.masked_fill(~padding_mask, float("-inf"))  
+            gated_emb = gated_emb.permute(0, 2, 1)
             pooled_emb = gated_emb.max(dim=-1)
         elif self.pool_type == "avg":
-            gated_emb = torch.where(padding_mask, gated_emb.permute(0, 2, 1), torch.tensor(0.).to(gated_emb.device))
-            pooled_emb = gated_emb.sum(dim=-1) / padding_mask.sum(dim=-1).unsqueeze(1)
+            gated_emb = gated_emb.masked_fill(~padding_mask, 0.)
+            gated_emb = gated_emb.permute(0, 2, 1)
+            pooled_emb = gated_emb.sum(dim=-1) / padding_mask.squeeze(-1).sum(dim=-1).unsqueeze(-1)
         else:
             raise ValueError("Invalid pool type")
         return pooled_emb
@@ -97,19 +99,18 @@ class HGN(nn.Module):
         # his_seqs: (batch_size, max_len), user_seqs: (batch_size)
 
         # Item Embedding
-        his_emb = self.item_emb(his_seqs)
-        user_emb = self.user_emb(user_seqs)
+        his_emb = self.item_emb(his_seqs)   # [batch_size, max_len, d_model]
+        user_emb = self.user_emb(user_seqs) # [batch_size, d_model]
 
-        features_gated_emb = self.features_gating(his_emb, user_emb)
-        instance_gated_emb = self.instance_gating(features_gated_emb, user_emb)
+        features_gated_emb = self.features_gating(his_emb, user_emb) # [batch_size, max_len, d_model]
+        instance_gated_emb = self.instance_gating(features_gated_emb, user_emb) # [batch_size, max_len, d_model]
 
         # Pooling
-        instance_gated_emb = instance_gated_emb.permute(0, 2, 1)
-        padding_mask = (his_seqs != self.pad_idx).unsqueeze(-1)
+        padding_mask = (his_seqs != self.pad_idx).unsqueeze(-1) # [batch_size, max_len, 1]
         
-        pooled_emb = self.padding_pool(instance_gated_emb, padding_mask)
+        pooled_emb = self.padding_pool(instance_gated_emb, padding_mask) # [batch_size, d_model]
         
-        his_embs = torch.where(padding_mask, his_emb, torch.tensor(0.).to(his_emb.device))
+        his_embs = his_emb.masked_fill(~padding_mask, 0.)
 
         final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
 
@@ -127,7 +128,7 @@ class HGN(nn.Module):
         if next_neg_items is not None:
             next_neg_items = next_neg_items.to(torch.long)
 
-        final_emb = self.encode_seqs(his_seqs, user_seqs)
+        final_emb = self.encode_seqs(his_seqs, user_seqs) # [batch_size, d_model]
         if self.loss_type == "bpr":
             assert next_neg_items is not None
             final_emb = final_emb.unsqueeze(1) # [batch_size, 1, d_model]

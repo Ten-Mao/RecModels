@@ -123,9 +123,9 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": GenRecDataset(args.data_path, args.dataset, "train", args.pair_num_per_pos),
-        "valid": GenRecDataset(args.data_path, args.dataset, "valid", args.pair_num_per_pos),
-        "test": GenRecDataset(args.data_path, args.dataset, "test", args.pair_num_per_pos)
+        "train": GenRecDataset(args.data_path, args.dataset, "train", pair_num_per_pos=args.pair_num_per_pos),
+        "valid": GenRecDataset(args.data_path, args.dataset, "valid", pair_num_per_pos=args.pair_num_per_pos),
+        "test": GenRecDataset(args.data_path, args.dataset, "test", pair_num_per_pos=args.pair_num_per_pos)
     }
 
     dataloaders = {

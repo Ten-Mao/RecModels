@@ -105,11 +105,11 @@ class Caser(nn.Module):
         out_vertical = self.vertical_conv(his_emb.unsqueeze(1)).reshape(-1, self.n_vertical_conv * self.d_model)
 
         # concatenate conv and get latent vector
-        out_conv = self.dropout(torch.cat([out_horizontal, out_vertical], dim=-1))
+        out_conv = torch.cat([out_horizontal, out_vertical], dim=-1)
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        final_emb = self.fc2(torch.cat([conv_latent, user_emb], dim=-1))
+        final_emb = self.dropout(self.fc2(torch.cat([conv_latent, user_emb], dim=-1)))
         return final_emb
 
     def forward(self, interactions):
