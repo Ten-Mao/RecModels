@@ -413,7 +413,10 @@ def run():
     logger = Logger(log_file_path)
     logger.args_log(args, args_part_msg)
 
-
+    # redirect stdout and stderr
+    sys.stdout = logger.log_file
+    sys.stderr = logger.log_file
+    
     # train and eval
     best_valid_metric = math.inf
     best_epoch = -1

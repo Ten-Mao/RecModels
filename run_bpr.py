@@ -31,7 +31,7 @@ def parser_args():
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
-    parser.add_argument("--d_model", type=int, default=32)
+    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--loss_type", choices=["bpr"], default="bpr")
 
     # train and eval
@@ -119,9 +119,27 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": GenRecDataset(args.data_path, args.dataset, "train", pair_num_per_pos=args.pair_num_per_pos),
-        "valid": GenRecDataset(args.data_path, args.dataset, "valid", pair_num_per_pos=args.pair_num_per_pos),
-        "test": GenRecDataset(args.data_path, args.dataset, "test", pair_num_per_pos=args.pair_num_per_pos)
+        "train": GenRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            mode="train", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "valid": GenRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            mode="valid", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "test": GenRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            mode="test", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        )
     }
 
     dataloaders = {
@@ -358,7 +376,10 @@ def run():
     logger = Logger(log_file_path)
     logger.args_log(args, args_part_msg)
 
-
+    # redirect stdout and stderr
+    sys.stdout = logger.log_file
+    sys.stderr = logger.log_file
+    
     # train and eval
     best_valid_metric = math.inf
     best_epoch = -1

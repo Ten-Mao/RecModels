@@ -139,9 +139,30 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", pair_num_per_pos=args.pair_num_per_pos),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", pair_num_per_pos=args.pair_num_per_pos),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", pair_num_per_pos=args.pair_num_per_pos)
+        "train": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="train", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "valid": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="valid", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "test": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="test", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        )
     }
 
     dataloaders = {
@@ -386,6 +407,9 @@ def run():
     logger = Logger(log_file_path)
     logger.args_log(args, args_part_msg)
 
+    # redirect stdout and stderr
+    sys.stdout = logger.log_file
+    sys.stderr = logger.log_file
 
     # train and eval
     best_valid_metric = math.inf

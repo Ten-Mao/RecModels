@@ -42,7 +42,7 @@ class SeqRecDataset(Dataset):
         ensure_dir(self.cache_dir_path)
 
         self.cache_file_path = os.path.join(data_root_path, dataset, f"cache/SeqRecDataset/{seed}-{max_len}-{mask_ratio}-{pair_num_per_pos}-{mode}.npy")
-        if os.path.exists(self.cache_path):
+        if os.path.exists(self.cache_file_path):
             self.inter_data = np.load(self.cache_file_path, allow_pickle=True)
             return
 
@@ -290,7 +290,7 @@ class GenRecDataset(Dataset):
         ensure_dir(self.cache_dir_path)
 
         self.cache_file_path = os.path.join(data_root_path, dataset, f"cache/GenRecDataset/{seed}-{pair_num_per_pos}-{mode}.npy")
-        if os.path.exists(self.cache_path):
+        if os.path.exists(self.cache_file_path):
             self.inter_data = np.load(self.cache_file_path, allow_pickle=True)
             return
         

@@ -32,7 +32,7 @@ def parser_args():
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
-    parser.add_argument("--d_model", type=int, default=32)
+    parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--n_horizontal_conv_per_h", type=int, default=16)
     parser.add_argument("--n_vertical_conv", type=int, default=4)
@@ -132,9 +132,30 @@ def get_device(args):
 def initial_dataLoader(args):
 
     datasets = {
-        "train": SeqRecDataset(args.data_path, args.dataset, args.max_len, "train", pair_num_per_pos=args.pair_num_per_pos),
-        "valid": SeqRecDataset(args.data_path, args.dataset, args.max_len, "valid", pair_num_per_pos=args.pair_num_per_pos),
-        "test": SeqRecDataset(args.data_path, args.dataset, args.max_len, "test", pair_num_per_pos=args.pair_num_per_pos)
+        "train": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="train", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "valid": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="valid", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        ),
+        "test": SeqRecDataset(
+            data_root_path=args.data_path, 
+            dataset=args.dataset, 
+            max_len=args.max_len, 
+            mode="test", 
+            pair_num_per_pos=args.pair_num_per_pos,
+            seed=args.seed
+        )
     }
 
     dataloaders = {
@@ -377,7 +398,10 @@ def run():
     logger = Logger(log_file_path)
     logger.args_log(args, args_part_msg)
 
-
+    # redirect stdout and stderr
+    sys.stdout = logger.log_file
+    sys.stderr = logger.log_file
+    
     # train and eval
     best_valid_metric = math.inf
     best_epoch = -1
