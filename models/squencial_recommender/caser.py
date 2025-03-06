@@ -63,11 +63,9 @@ class Caser(nn.Module):
             if module.padding_idx is not None:
                 nn.init.constant_(module.weight[module.padding_idx], 0)
         elif isinstance(module, nn.Linear):
-            nn.init.xavier_normal_(module.weight)
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0)
         elif isinstance(module, nn.Conv2d):
-            nn.init.xavier_normal_(module.weight)
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0)
 
@@ -109,7 +107,8 @@ class Caser(nn.Module):
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        final_emb = self.dropout(self.fc2(torch.cat([conv_latent, user_emb], dim=-1)))
+        # final_emb = self.dropout(self.fc2(torch.cat([conv_latent, user_emb], dim=-1)))
+        final_emb = self.dropout(conv_latent)
         return final_emb
 
     def forward(self, interactions):

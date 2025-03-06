@@ -18,7 +18,6 @@ class MultiHeadAttention(nn.Module):
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            nn.init.xavier_normal_(module.weight)
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0)
     

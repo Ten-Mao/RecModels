@@ -91,7 +91,6 @@ class SASRec(nn.Module):
 
         # Embedding Layer
         item_emb = self.item_emb(his_seqs)
-        item_emb = item_emb * np.sqrt(self.d_model)
         pos = (
             torch.arange(his_seqs.shape[-1])
             .unsqueeze(0)

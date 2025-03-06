@@ -42,7 +42,6 @@ class Gru4Rec(nn.Module):
             if module.padding_idx is not None:
                 nn.init.constant_(module.weight[module.padding_idx], 0)
         elif isinstance(module, nn.Linear):
-            nn.init.xavier_normal_(module.weight)
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0)
         elif isinstance(module, nn.GRU):
