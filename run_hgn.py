@@ -50,6 +50,7 @@ def parser_args():
     parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
     parser.add_argument("--eval_step", type=int, default=1)
     parser.add_argument("--early_stop_step", type=int, default=20)
+    parser.add_argument("--eval_metric", choices=["Recall@5", "NDCG@5", "loss"], default="Recall@5")
 
     # test
     parser.add_argument("--metrics", nargs="+", choices=["Recall", "NDCG"], default=["Recall", "NDCG"])
@@ -81,6 +82,7 @@ def parser_args():
             "scheduler_type",
             "eval_step",
             "early_stop_step",
+            "eval_metric",
 
             "time",
             "Recall@5",
@@ -269,18 +271,48 @@ def eval_epoch(
     epoch,
     model,
     valid_loader,
+    eval_metric,
     device,
     logger
 ):
     model.eval()
     total_loss = []
     logger.log(f"Epoch [{epoch + 1}] - Start Evaluating")
-    for step, batch in enumerate(valid_loader):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        loss = model(batch)
-        total_loss.append(loss.item())
-    valid_metric = np.mean(total_loss)
-    logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate Loss: {valid_metric:.4f}")
+    if eval_metric == "loss":
+        for step, batch in enumerate(valid_loader):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            loss = model(batch)
+            total_loss.append(loss.item())
+        valid_metric = np.mean(total_loss)
+        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate Loss: {valid_metric:.4f}")
+    elif eval_metric == "Recall@5":
+        metric_values = []
+        value_num = 0
+        for step, batch in enumerate(valid_loader):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            scores = model.inference(batch)
+            _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            metric_values.append(
+                recall_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+            )
+            value_num += batch["next_items"].shape[0]
+        valid_metric = np.sum(metric_values) / value_num
+        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate Recall@5: {valid_metric:.4f}")
+    elif eval_metric == "NDCG@5":
+        metric_values = []
+        value_num = 0
+        for step, batch in enumerate(valid_loader):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            scores = model.inference(batch)
+            _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            metric_values.append(
+                ndcg_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+            )
+            value_num += batch["next_items"].shape[0]
+        valid_metric = np.sum(metric_values) / value_num
+        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate NDCG@5: {valid_metric:.4f}")
+    else:
+        raise ValueError("Invalid eval metric.")
 
     return valid_metric
 
@@ -391,7 +423,7 @@ def run():
     sys.stderr = logger.log_file
     
     # train and eval
-    best_valid_metric = math.inf
+    best_valid_metric = math.inf if args.eval_metric == "loss" else math.inf * -1
     best_epoch = -1
     patience = 0
 
@@ -399,21 +431,37 @@ def run():
         for epoch in range(args.epochs):
             train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
             if epoch % args.eval_step == 0:
-                valid_metric = eval_epoch(epoch, model, valid_loader, device, logger)
+                valid_metric = eval_epoch(epoch, model, valid_loader, args.eval_metric, device, logger)
                 test(model, test_loader, device, logger, args)
-                if valid_metric < best_valid_metric:
-                    patience = 0
-                    best_valid_metric = valid_metric
-                    best_epoch = epoch
-                    torch.save(model.state_dict(), save_file_path)
-                    logger.log(f"Save model at epoch [{epoch + 1}]")
+                if args.eval_metric == "loss":
+                    if valid_metric < best_valid_metric:
+                        patience = 0
+                        best_valid_metric = valid_metric
+                        best_epoch = epoch
+                        torch.save(model.state_dict(), save_file_path)
+                        logger.log(f"Save model at epoch [{epoch + 1}]")
+                    else:
+                        patience += 1
+                        logger.log(f"Patience: {patience}/{args.early_stop_step}")
+                        if patience >= args.early_stop_step:
+                            logger.log(f"Early stop at epoch [{epoch + 1}]")
+                            break
+                elif args.eval_metric in ["Recall@5", "NDCG@5"]:
+                    if valid_metric > best_valid_metric:
+                        patience = 0
+                        best_valid_metric = valid_metric
+                        best_epoch = epoch
+                        torch.save(model.state_dict(), save_file_path)
+                        logger.log(f"Save model at epoch [{epoch + 1}]")
+                    else:
+                        patience += 1
+                        logger.log(f"Patience: {patience}/{args.early_stop_step}")
+                        if patience >= args.early_stop_step:
+                            logger.log(f"Early stop at epoch [{epoch + 1}]")
+                            break
                 else:
-                    patience += 1
-                    logger.log(f"Patience: {patience}/{args.early_stop_step}")
-                    if patience >= args.early_stop_step:
-                        logger.log(f"Early stop at epoch [{epoch + 1}]")
-                        break
-        logger.log(f"Best epoch: {best_epoch + 1}, Best valid metric: {best_valid_metric:.4f}")
+                    raise ValueError("Invalid eval metric.")
+        logger.log(f"Best epoch: {best_epoch + 1}, Best valid {args.eval_metric}: {best_valid_metric:.4f}")
         
         # test
         model.load_state_dict(torch.load(save_file_path, weights_only=True))

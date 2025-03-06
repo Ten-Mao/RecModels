@@ -69,14 +69,16 @@ class HGN(nn.Module):
     def features_gating(self, item_emb, user_emb):
         # item_emb: (batch_size, max_len, d_model), user_emb: (batch_size, d_model)
 
-        gate = self.activation1(self.w1(item_emb) + self.w2(user_emb).unsqueeze(1) + self.b)
+        # gate = self.activation1(self.w1(item_emb) + self.w2(user_emb).unsqueeze(1) + self.b)
+        gate = self.activation1(self.w1(item_emb) + self.b)
         
         return item_emb * gate
     
     def instance_gating(self, item_emb, user_emb):
         # item_emb: (batch_size, max_len, d_model), user_emb: (batch_size, d_model)
 
-        gate = self.activation2(self.w3(item_emb) + self.w4(user_emb).unsqueeze(1))
+        # gate = self.activation2(self.w3(item_emb) + self.w4(user_emb).unsqueeze(1))
+        gate = self.activation2(self.w3(item_emb))
         
         return item_emb * gate
  
@@ -111,8 +113,8 @@ class HGN(nn.Module):
         
         his_embs = his_emb.masked_fill(~padding_mask, 0.)
 
-        final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
-
+        # final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
+        final_emb = pooled_emb + his_embs.sum(dim=1)
         return final_emb
 
     def forward(self, interactions):

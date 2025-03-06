@@ -51,6 +51,7 @@ class Caser(nn.Module):
         self.fc1 = nn.Linear(n_horizontal_conv_per_h * max_seq_len + n_vertical_conv * d_model, d_model)
         self.activation_fc = self.get_activation(activation_fc)
         self.fc2 = nn.Linear(d_model * 2, d_model)
+        # self.fc2 = nn.Linear(d_model, d_model)
 
 
         self.loss_type = loss_type
@@ -107,8 +108,8 @@ class Caser(nn.Module):
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        # final_emb = self.dropout(self.fc2(torch.cat([conv_latent, user_emb], dim=-1)))
-        final_emb = self.dropout(conv_latent)
+        final_emb = self.dropout(self.fc2(torch.cat([F.layer_norm(conv_latent, [conv_latent.shape[-1]]), user_emb], dim=-1)))
+        # final_emb = self.dropout(self.fc2(conv_latent))
         return final_emb
 
     def forward(self, interactions):
