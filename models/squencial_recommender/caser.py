@@ -18,7 +18,7 @@ class Caser(nn.Module):
         activation_conv: Literal["relu", "tanh"] = "relu",
         dropout: float = 0.5,
         activation_fc: Literal["relu", "tanh"] = "relu",
-
+        using_user_emb: bool = False,
         pad_idx: int = 0,
         loss_type: Literal["bpr", "ce"] = "ce",  
     ):
@@ -27,6 +27,7 @@ class Caser(nn.Module):
         self.n_users = n_users
         self.d_model = d_model
         self.pad_idx = pad_idx
+        self.using_user_emb = using_user_emb
 
         self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
         self.user_emb = nn.Embedding(n_users, d_model)
@@ -50,8 +51,8 @@ class Caser(nn.Module):
         
         self.fc1 = nn.Linear(n_horizontal_conv_per_h * max_seq_len + n_vertical_conv * d_model, d_model)
         self.activation_fc = self.get_activation(activation_fc)
-        self.fc2 = nn.Linear(d_model * 2, d_model)
-        # self.fc2 = nn.Linear(d_model, d_model)
+        self.layernorm = nn.LayerNorm(d_model)
+        self.fc2 = nn.Linear(d_model * 2, d_model) if using_user_emb else nn.Linear(d_model, d_model)
 
 
         self.loss_type = loss_type
@@ -108,8 +109,10 @@ class Caser(nn.Module):
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        final_emb = self.dropout(self.fc2(torch.cat([F.layer_norm(conv_latent, [conv_latent.shape[-1]]), user_emb], dim=-1)))
-        # final_emb = self.dropout(self.fc2(conv_latent))
+        if self.using_user_emb:
+            final_emb = self.dropout(self.fc2(torch.cat([self.layernorm(conv_latent), user_emb], dim=-1)))
+        else:
+            final_emb = self.dropout(self.fc2(conv_latent))
         return final_emb
 
     def forward(self, interactions):

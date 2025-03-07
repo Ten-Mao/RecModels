@@ -34,6 +34,7 @@ def parser_args():
     # model
     parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--pool_type", choices=["max", "avg"], default="avg")
+    parser.add_argument("--using_user_emb", action="store_true")
     parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 
     # train and eval
@@ -67,6 +68,7 @@ def parser_args():
             "seed",
             "d_model", 
             "pool_type",
+            "using_user_emb",
             "loss_type",
 
             "epochs",
@@ -187,6 +189,7 @@ def initial_model(args, device):
         args.num_users,
         args.d_model,
         args.pool_type,
+        using_user_emb=args.using_user_emb,
         loss_type=args.loss_type
     ).to(device)
 

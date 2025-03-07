@@ -38,6 +38,7 @@ def parser_args():
     parser.add_argument("--n_vertical_conv", type=int, default=4)
     parser.add_argument("--activation_conv", choices=["relu", "tanh"], default="relu")
     parser.add_argument("--activation_fc", choices=["relu", "tanh"], default="relu")
+    parser.add_argument("--using_user_emb", action="store_true")
     parser.add_argument("--loss_type", choices=["bpr", "ce"], default="ce")
 
     # train and eval
@@ -75,6 +76,7 @@ def parser_args():
             "n_vertical_conv",
             "activation_conv",
             "activation_fc",
+            "using_user_emb",
             "loss_type",
 
             "epochs",
@@ -200,6 +202,7 @@ def initial_model(args, device):
         args.activation_conv,
         args.dropout,
         args.activation_fc,
+        using_user_emb=args.using_user_emb,
         loss_type=args.loss_type
     ).to(device)
 

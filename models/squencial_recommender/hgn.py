@@ -15,6 +15,7 @@ class HGN(nn.Module):
         pool_type: Literal["max", "avg"] = "avg",
 
         pad_idx: int = 0,
+        using_user_emb: bool = False,
         loss_type: Literal["bpr", "ce"] = "bpr",
     ):
         super(HGN, self).__init__()
@@ -27,6 +28,7 @@ class HGN(nn.Module):
         self.pad_idx = pad_idx
         self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
         self.user_emb = nn.Embedding(n_users, d_model)
+        self.using_user_emb = using_user_emb
 
         # features gating
         self.w1 = nn.Linear(d_model, d_model, bias=False)
@@ -38,7 +40,11 @@ class HGN(nn.Module):
         self.w3 = nn.Linear(d_model, d_model, bias=False)
         self.w4 = nn.Linear(d_model, d_model, bias=False)
         self.activation2 = nn.Sigmoid()
-
+    
+        self.user_layernorm = nn.LayerNorm(d_model)
+        self.his_layernorm = nn.LayerNorm(d_model)
+        self.pool_layernorm = nn.LayerNorm(d_model)
+        self.final_layernorm = nn.LayerNorm(d_model)
 
         self.pool_type = pool_type
 
@@ -70,7 +76,10 @@ class HGN(nn.Module):
         # item_emb: (batch_size, max_len, d_model), user_emb: (batch_size, d_model)
 
         # gate = self.activation1(self.w1(item_emb) + self.w2(user_emb).unsqueeze(1) + self.b)
-        gate = self.activation1(self.w1(item_emb) + self.b)
+        if self.using_user_emb:
+            gate = self.activation1(self.w1(item_emb) + self.w2(user_emb).unsqueeze(1) + self.b)
+        else:
+            gate = self.activation1(self.w1(item_emb) + self.b)
         
         return item_emb * gate
     
@@ -78,8 +87,10 @@ class HGN(nn.Module):
         # item_emb: (batch_size, max_len, d_model), user_emb: (batch_size, d_model)
 
         # gate = self.activation2(self.w3(item_emb) + self.w4(user_emb).unsqueeze(1))
-        gate = self.activation2(self.w3(item_emb))
-        
+        if self.using_user_emb:
+            gate = self.activation2(self.w3(item_emb) + self.w4(user_emb).unsqueeze(1))
+        else:
+            gate = self.activation2(self.w3(item_emb))
         return item_emb * gate
  
     def padding_pool(self, gated_emb, padding_mask):
@@ -113,8 +124,11 @@ class HGN(nn.Module):
         
         his_embs = his_emb.masked_fill(~padding_mask, 0.)
 
-        # final_emb = user_emb + pooled_emb + his_embs.sum(dim=1)
-        final_emb = pooled_emb + his_embs.sum(dim=1)
+        if self.using_user_emb:
+            final_emb = self.user_layernorm(user_emb) + self.pool_layernorm(pooled_emb) + self.his_layernorm(his_embs.sum(dim=1))
+        else:
+            final_emb = self.pool_layernorm(pooled_emb) + self.his_layernorm(his_embs.sum(dim=1))
+        final_emb = self.final_layernorm(final_emb)
         return final_emb
 
     def forward(self, interactions):
