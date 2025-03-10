@@ -7,7 +7,7 @@ import numpy as np
 from layers.FeedForward import FeedForward
 from layers.LayerNorm import LayerNorm
 from layers.MultiHeadAttention import MultiHeadAttention
-from util.loss import BPRLoss, CELoss
+
 
 class SASRec(nn.Module):
     def __init__(
@@ -24,9 +24,6 @@ class SASRec(nn.Module):
         ffn_dropout,
         eps, 
         num_layers,
-
-        pad_idx=0,
-        loss_type: Literal["bpr", "ce"] = "ce"
     ):
         super(SASRec, self).__init__()
         # Embedding Layer Parameters
@@ -44,11 +41,9 @@ class SASRec(nn.Module):
         self.eps = eps
         self.num_layers = num_layers
 
-        assert pad_idx == 0
-        self.pad_idx = pad_idx
-
+        self.pad_idx = 0
         # Embedding Layer
-        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
+        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=self.pad_idx) # zero for padding
         self.pos_emb = nn.Embedding(max_len, d_model)
 
         # Transformer Layer
@@ -67,24 +62,8 @@ class SASRec(nn.Module):
 
         self.final_norm = LayerNorm(d_model, eps=eps)    
 
-        self.loss_type = loss_type
-        self.loss_func = self.get_loss_func()
+        self.loss_func = torch.nn.CrossEntropyLoss()
 
-        self.apply(self.init_weights)
-    
-    def init_weights(self, module):
-        if isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight)
-            if module.padding_idx is not None:
-                nn.init.constant_(module.weight[module.padding_idx], 0)
-
-    def get_loss_func(self):
-        if self.loss_type == "bpr":
-            return BPRLoss()
-        elif self.loss_type == "ce":
-            return CELoss()
-        else:
-            raise ValueError("Invalid loss type.")    
 
     def encode_seqs(self, his_seqs):
         key_padding_mask = query_padding_mask = (his_seqs != self.pad_idx)
@@ -126,35 +105,19 @@ class SASRec(nn.Module):
         return torch.stack(res, dim=0)
     
     def forward(self, interactions):
-        # his_seqs: [batch_size, seq_len], next_items: [batch_size], next_neg_items: [batch_size, neg_samples]
+        # his_seqs: [batch_size, seq_len], next_items: [batch_size]
         his_seqs = interactions["his_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
-        next_neg_items = interactions.get("next_neg_items", None)
-        if next_neg_items is not None:
-            next_neg_items = next_neg_items.to(torch.long)
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)
-
-        if self.loss_type == "bpr":
-            assert next_neg_items is not None
-            target_emb = target_emb.unsqueeze(1) # [batch_size, 1, d_model]
-            pos_emb = self.item_emb(next_items).unsqueeze(1) # [batch_size, 1, d_model]
-            neg_emb = self.item_emb(next_neg_items) # [batch_size, neg_samples, d_model]
-            pos_scores = torch.sum(target_emb * pos_emb, dim=-1).repeat(1, neg_emb.shape[1]) # [batch_size, neg_samples]
-            neg_scores = torch.sum(target_emb * neg_emb, dim=-1) # [batch_size, neg_samples]
-            loss = self.loss_func(pos_scores, neg_scores)
-        elif self.loss_type == "ce":
-            scores = target_emb @ self.item_emb.weight[1:].t()
-            loss = self.loss_func(scores, next_items - 1)
-        else:
-            raise ValueError("Invalid loss type.")
+        scores = target_emb @ self.item_emb.weight[1:].t()
+        loss = self.loss_func(scores, next_items - 1)
         return loss
     
     def inference(self, interactions):
         # his_seqs: [batch_size, seq_len]
         his_seqs = interactions["his_seqs"].to(torch.long)
-
         target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
         target_emb = self.extract(his_emb, target_indices)

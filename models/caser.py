@@ -14,30 +14,26 @@ class Caser(nn.Module):
         d_model,
         n_horizontal_conv_per_h: int,
         n_vertical_conv: int,
-        max_seq_len: int,
+        max_len: int,
         activation_conv: Literal["relu", "tanh"] = "relu",
         dropout: float = 0.5,
         activation_fc: Literal["relu", "tanh"] = "relu",
-        using_user_emb: bool = False,
-        pad_idx: int = 0,
-        loss_type: Literal["bpr", "ce"] = "ce",  
     ):
         super(Caser, self).__init__()
         self.n_items = n_items
         self.n_users = n_users
         self.d_model = d_model
-        self.pad_idx = pad_idx
-        self.using_user_emb = using_user_emb
+        self.pad_idx = 0
 
-        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=pad_idx) # zero for padding
+        self.item_emb = nn.Embedding(n_items + 1, d_model, padding_idx=self.pad_idx) # zero for padding
         self.user_emb = nn.Embedding(n_users, d_model)
     
         self.n_horizontal_conv_per_h = n_horizontal_conv_per_h
         self.n_vertical_conv = n_vertical_conv
-        self.max_seq_len = max_seq_len
+        self.max_len = max_len
 
 
-        self.h_list = [ i + 1 for i in range(max_seq_len)]
+        self.h_list = [ i + 1 for i in range(max_len)]
         self.horizontal_conv = nn.ModuleList(
             [
                 nn.Conv2d(in_channels=1, out_channels=n_horizontal_conv_per_h, kernel_size=(h_i, d_model))
@@ -45,39 +41,17 @@ class Caser(nn.Module):
             ]
         )
         self.activation_conv = self.get_activation(activation_conv)
-        self.vertical_conv = nn.Conv2d(in_channels=1, out_channels=n_vertical_conv, kernel_size=(max_seq_len, 1))
+        self.vertical_conv = nn.Conv2d(in_channels=1, out_channels=n_vertical_conv, kernel_size=(max_len, 1))
         
         self.dropout = nn.Dropout(dropout)
         
-        self.fc1 = nn.Linear(n_horizontal_conv_per_h * max_seq_len + n_vertical_conv * d_model, d_model)
+        self.fc1 = nn.Linear(n_horizontal_conv_per_h * max_len + n_vertical_conv * d_model, d_model)
         self.activation_fc = self.get_activation(activation_fc)
         self.layernorm = nn.LayerNorm(d_model)
-        self.fc2 = nn.Linear(d_model * 2, d_model) if using_user_emb else nn.Linear(d_model, d_model)
+        self.fc2 = nn.Linear(d_model * 2, d_model)
 
 
-        self.loss_type = loss_type
-        self.loss_func = self.get_loss_func()
-        self.apply(self.init_weights)
-    
-    def init_weights(self, module):
-        if isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight)
-            if module.padding_idx is not None:
-                nn.init.constant_(module.weight[module.padding_idx], 0)
-        elif isinstance(module, nn.Linear):
-            if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
-        elif isinstance(module, nn.Conv2d):
-            if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
-
-    def get_loss_func(self):
-        if self.loss_type == "bpr":
-            return BPRLoss()
-        elif self.loss_type == "ce":
-            return CELoss()
-        else:
-            raise ValueError("Invalid loss type.")    
+        self.loss_func = nn.CrossEntropyLoss()
 
     def get_activation(self, activation: str):
         if activation == "relu":
@@ -98,7 +72,7 @@ class Caser(nn.Module):
             out_conv_i = self.activation_conv(conv_i(his_emb.unsqueeze(1)).squeeze(-1))
             pool_conv_i = F.max_pool1d(out_conv_i, out_conv_i.shape[-1]).squeeze(-1)
             out_horizontal.append(pool_conv_i)
-        out_horizontal = torch.cat(out_horizontal, dim=-1) # [batch_size, n_horizontal_conv_per_h * max_seq_len]
+        out_horizontal = torch.cat(out_horizontal, dim=-1) # [batch_size, n_horizontal_conv_per_h * max_len]
 
         # vertical convolution
         # [batch_size, n_vertical_conv, 1, d_model] -> [batch_size, n_vertical_conv * d_model]
@@ -109,38 +83,20 @@ class Caser(nn.Module):
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        if self.using_user_emb:
-            final_emb = self.dropout(self.fc2(torch.cat([self.layernorm(conv_latent), user_emb], dim=-1)))
-        else:
-            final_emb = self.dropout(self.fc2(conv_latent))
+        final_emb = self.dropout(self.fc2(torch.cat([self.layernorm(conv_latent), user_emb], dim=-1)))
         return final_emb
 
     def forward(self, interactions):
         # his_seqs: [batch_size, seq_len], 
         # user_seqs: [batch_size], 
         # next_items: [batch_size], 
-        # next_neg_items: [batch_size, neg_samples]
         his_seqs = interactions["his_seqs"].to(torch.long)
         user_seqs = interactions["user_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
-        next_neg_items = interactions.get("next_neg_items", None)
-        if next_neg_items is not None:
-            next_neg_items = next_neg_items.to(torch.long)
         final_emb = self.encode_seqs(his_seqs, user_seqs)
 
-        if self.loss_type == "bpr":
-            assert next_neg_items is not None
-            final_emb = final_emb.unsqueeze(1)   # [batch_size, 1, d_model]
-            pos_emb = self.item_emb(next_items).unsqueeze(1)    # [batch_size, 1, d_model]
-            neg_emb = self.item_emb(next_neg_items) # [batch_size, neg_samples, d_model]
-            pos_scores = torch.sum(final_emb * pos_emb, dim=-1).repeat(1, neg_emb.shape[1]) # [batch_size, neg_samples]
-            neg_scores = torch.sum(final_emb * neg_emb, dim=-1) # [batch_size, neg_samples]
-            loss = self.loss_func(pos_scores, neg_scores)
-        elif self.loss_type == "ce":
-            scores = final_emb @ self.item_emb.weight[1:].t()
-            loss = self.loss_func(scores, next_items - 1)
-        else:
-            raise ValueError("Invalid loss type.")
+        scores = final_emb @ self.item_emb.weight[1:].t()
+        loss = self.loss_func(scores, next_items - 1)
         
         return loss
     

@@ -11,7 +11,7 @@ import torch
 from data.dataset import SeqRecDataset
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
-from models.squencial_recommender.bert4rec import Bert4Rec
+from models.bert4rec import Bert4Rec
 from util.evaluate import ndcg_at_k, recall_at_k
 from util.logger import Logger
 from util.util import ensure_dir, ensure_file
@@ -40,7 +40,6 @@ def parser_args():
     parser.add_argument("--ffn_dropout", type=float, default=0.1)
     parser.add_argument("--eps", type=float, default=1e-12)
     parser.add_argument("--num_layers", type=int, default=2)
-    parser.add_argument("--loss_type", choices=["bpr", "ce"], default="bpr")
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
@@ -48,13 +47,11 @@ def parser_args():
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
-    parser.add_argument("--pair_num_per_pos", type=int, default=100)
-    parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=1e-2)
+    parser.add_argument("--wd", type=float, default=1e-2)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
-    parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
+    parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--eval_step", type=int, default=1)
     parser.add_argument("--early_stop_step", type=int, default=20)
     parser.add_argument("--eval_metric", choices=["Recall@5", "NDCG@5", "loss"], default="Recall@5")
@@ -81,20 +78,17 @@ def parser_args():
             "ffn_dropout", 
             "eps", 
             "num_layers", 
-            "loss_type",
 
             "epochs",
             "train_batch_size",
             "valid_batch_size",
             "test_batch_size",
             "max_len",
-            "pair_num_per_pos",
-            "mask_ratio",
             "lr",
-            "weight_decay",
+            "wd",
             "optimizer",
-            "warmup_ratio",
             "scheduler_type",
+            "warmup_ratio",
             "eval_step",
             "early_stop_step",
             "eval_metric",
@@ -106,19 +100,6 @@ def parser_args():
             "NDCG@10"
         ]
     )
-    parser.add_argument(
-        "--params_in_all_model_result", 
-        nargs="+", 
-        default=[
-            "Model",
-            "Recall@5",
-            "NDCG@5",
-            "Recall@10",
-            "NDCG@10"
-        ]
-    )
-    parser.add_argument("--selected_best_model_metric", choices=["Recall@5", "NDCG@5", "Recall@10", "NDCG@10"], default="Recall@5")
-   
 
     return parser.parse_args()
 
@@ -129,11 +110,6 @@ def set_seed(args):
     torch.cuda.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-def seed_worker(worker_id):
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
 
 def get_device(args):
     return torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
@@ -147,7 +123,6 @@ def initial_dataLoader(args):
             max_len=args.max_len, 
             mode="train", 
             mask_ratio=args.mask_ratio, 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         ),
         "valid": SeqRecDataset(
@@ -156,7 +131,6 @@ def initial_dataLoader(args):
             max_len=args.max_len, 
             mode="valid", 
             mask_ratio=args.mask_ratio, 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         ),
         "test": SeqRecDataset(
@@ -165,7 +139,6 @@ def initial_dataLoader(args):
             max_len=args.max_len, 
             mode="test", 
             mask_ratio=args.mask_ratio, 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         )
     }
@@ -176,7 +149,6 @@ def initial_dataLoader(args):
             batch_size=args.train_batch_size, 
             shuffle=True,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         ),
         "valid": DataLoader(
@@ -184,7 +156,6 @@ def initial_dataLoader(args):
             batch_size=args.valid_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         ),
         "test": DataLoader(
@@ -192,7 +163,6 @@ def initial_dataLoader(args):
             batch_size=args.test_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         )
     }
@@ -201,18 +171,17 @@ def initial_dataLoader(args):
 
 def initial_model(args, device):
     model = Bert4Rec(
-        args.num_items,
-        args.emb_dropout,
-        args.max_len,
-        args.d_model,
-        args.n_heads,
-        args.attn_dropout,
-        args.inner_dim,
-        args.ffn_activation,
-        args.ffn_dropout,
-        args.eps,
-        args.num_layers,
-        loss_type=args.loss_type
+        n_items=args.num_items,
+        emb_dropout=args.emb_dropout,
+        max_len=args.max_len,
+        d_model=args.d_model,
+        n_heads=args.n_heads,
+        attn_dropout=args.attn_dropout,
+        inner_dim=args.inner_dim,
+        ffn_activation=args.ffn_activation,
+        ffn_dropout=args.ffn_dropout,
+        eps=args.eps,
+        num_layers=args.num_layers,
     ).to(device)
 
     return model
@@ -425,11 +394,10 @@ def run():
     save_dir_path = os.path.join(args.save_root_path, args.dataset)
     save_file_path = os.path.join(args.save_root_path, args.dataset, f"{MODEL_NAME}-{time_now}.pth")
     model_result_file_path = os.path.join(args.result_root_path, args.dataset, f"{MODEL_NAME}.result.csv")
-    # all_model_result_path = os.path.join(args.result_root_path, args.dataset, "All.result.csv")
+    
     ensure_file(log_file_path)
     ensure_dir(save_dir_path)
     ensure_file(model_result_file_path, args.params_in_model_result)
-    # ensure_file(all_model_result_path, args.params_in_all_model_result)
 
     # initial logger
     args_part_msg = {

@@ -25,8 +25,6 @@ class Bert4Rec(nn.Module):
         eps, 
         num_layers,
 
-        pad_idx=0,
-        loss_type: Literal["bpr", "ce"] = "ce"
     ):
         super(Bert4Rec, self).__init__()
         # Embedding Layer Parameters
@@ -44,12 +42,10 @@ class Bert4Rec(nn.Module):
         self.eps = eps
         self.num_layers = num_layers
 
-        assert pad_idx == 0
-        self.pad_idx = pad_idx
-        self.mask_idx = n_items + 1
+        self.pad_idx = 0
 
         # Embedding Layer
-        self.item_emb = nn.Embedding(n_items + 2, d_model, padding_idx=pad_idx) # zero for padding and last for [MASK]
+        self.item_emb = nn.Embedding(n_items + 2, d_model, padding_idx=self.pad_idx) # zero for padding and last for [MASK]
         self.pos_emb = nn.Embedding(max_len + 1, d_model) # last for injecting target item in the inference phase
 
         # Transformer Layer
@@ -62,7 +58,7 @@ class Bert4Rec(nn.Module):
 
         for _ in range(num_layers):
             self.attn_norm.append(LayerNorm(d_model, eps=eps))
-            self.attn.append(MultiHeadAttention(d_model, n_heads, attn_dropout, causal=False, q_mask=False))
+            self.attn.append(MultiHeadAttention(d_model, n_heads, attn_dropout, causal=False, q_mask=True))
             self.ffn_norm.append(LayerNorm(d_model, eps=eps))
             self.ffn.append(FeedForward(d_model, inner_dim, ffn_dropout, ffn_activation))
 
@@ -71,29 +67,10 @@ class Bert4Rec(nn.Module):
         self.final_norm1 = LayerNorm(d_model, eps=eps)        
         self.final_norm2 = LayerNorm(d_model, eps=eps)      
 
-        self.loss_type = loss_type
-        self.loss_func = self.get_loss_func()
-        self.apply(self.init_weights)
-    
-    def init_weights(self, module):
-        if isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight)
-            if module.padding_idx is not None:
-                nn.init.constant_(module.weight[module.padding_idx], 0)
-        elif isinstance(module, nn.Linear):
-            if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
-
-    def get_loss_func(self):
-        if self.loss_type == "bpr":
-            return BPRLoss()
-        elif self.loss_type == "ce":
-            return CELoss()
-        else:
-            raise ValueError("Invalid loss type.")    
+        self.loss_func = nn.CrossEntropyLoss()
         
     def encode_seqs(self, his_seqs):
-        key_padding_mask = (his_seqs != self.pad_idx)
+        key_padding_mask = query_padding_mask = (his_seqs != self.pad_idx)
 
         # Embedding Layer
         item_emb = self.item_emb(his_seqs)
@@ -112,9 +89,8 @@ class Bert4Rec(nn.Module):
         x = self.emb_dropout(x)
 
         for i in range(self.num_layers):
-            x = self.attn_norm[i](x)
-            q = k = v = x
-            x = self.attn[i](q, k, v, key_padding_mask=key_padding_mask)
+            q, k, v = self.attn_norm[i](x), x, x
+            x = self.attn[i](q, k, v, key_padding_mask=key_padding_mask, query_padding_mask=query_padding_mask)
 
             x = self.ffn_norm[i](x)
             x = self.ffn[i](x)
@@ -141,42 +117,15 @@ class Bert4Rec(nn.Module):
         return x_pad, target_indices
 
     def forward(self, interactions):
-        # masked_his_seqs: [batch_size, seq_len], 
-        # mask_indices: [batch_size, max_mask_len], 
-        # mask_items: [batch_size, max_mask_len], 
-        # mask_neg_items: [batch_size, max_mask_len, neg_samples]
+        # his_seqs: [batch_size, seq_len], next_items: [batch_size]
+        his_seqs = interactions["his_seqs"].to(torch.long)
+        next_items = interactions["next_items"].to(torch.long)
+        his_seqs, target_indices = self.inject(his_seqs)
+        his_emb = self.encode_seqs(his_seqs)
+        target_emb = self.extract(his_emb, target_indices)
 
-        masked_his_seqs = interactions["masked_his_seqs"].to(torch.long)
-        mask_indices = interactions["mask_indices"].to(torch.long)
-        mask_items = interactions["mask_items"].to(torch.long)
-        mask_neg_items = interactions.get("mask_neg_items", None)
-        if mask_neg_items is not None:
-            mask_neg_items = mask_neg_items.to(torch.long)
-
-        his_emb = self.encode_seqs(masked_his_seqs)
-
-        mask_onehot = F.one_hot(mask_indices.reshape(-1), num_classes=masked_his_seqs.shape[1]).to(his_emb.dtype)
-        mask_onehot = mask_onehot.reshape(mask_indices.shape[0], mask_indices.shape[1], -1)
-        # mask_onehot: [batch_size, max_mask_len, seq_len] -> [batch_size, max_mask_len, d_model]
-        pred_emb = mask_onehot @ his_emb 
-
-        if self.loss_type == "bpr":
-            assert mask_neg_items is not None
-            pred_emb = pred_emb.unsqueeze(-2) # [batch_size, max_mask_len, 1, d_model]
-            pos_emb = self.item_emb(mask_items).unsqueeze(-2) # [batch_size, max_mask_len, 1, d_model]
-            neg_emb = self.item_emb(mask_neg_items) # [batch_size, max_mask_len, neg_samples, d_model]
-            pos_scores = torch.sum(pred_emb * pos_emb, dim=-1).repeat(1, 1, neg_emb.shape[-2]) # [batch_size, max_mask_len, neg_samples]
-            neg_scores = torch.sum(pred_emb * neg_emb, dim=-1) # [batch_size, max_mask_len, neg_samples]
-            mask = (mask_items != self.pad_idx).unsqueeze(-1).repeat(1, 1, neg_emb.shape[-2]) # [batch_size, max_mask_len, neg_samples]
-            loss = self.loss_func(pos_scores, neg_scores, mask=mask)
-        elif self.loss_type == "ce":
-            scores = pred_emb @ self.item_emb.weight[1:-1].t() # [batch_size, max_mask_len, n_items]
-            scores = scores.reshape(-1, self.n_items)
-            mask_items = mask_items.reshape(-1)
-            loss = self.loss_func(scores, mask_items - 1, ignore_index=self.pad_idx - 1)
-        else:
-            raise ValueError("Invalid loss type.")
-
+        scores = target_emb @ self.item_emb.weight[1:-1].t()
+        loss = self.loss_func(scores, next_items - 1)
         return loss
     
     def inference(self, interactions):
