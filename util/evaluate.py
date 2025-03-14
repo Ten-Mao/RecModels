@@ -1,40 +1,40 @@
+import numpy as np
 import torch
 
 
-def ndcg_at_k(pred, target, k):
+def ndcg_at_k(pred, tgt, k):
     """
-    Compute Normalized Discounted Cumulative Gain at k.
-    
+    Calculate NDCG at K using NumPy.
+
     Args:
-        pred (torch.Tensor): Tensor containing predicted item. shape: (batch_size, n_items) start from 1
-        target (torch.Tensor): Tensor containing ground truth item. shape: (batch_size,) start from 1
-        k (int): The rank to compute NDCG at.
-    
+    - pred: Array of shape [B, K], predicted ranking for each user
+    - tgt: Array of shape [B], ground truth relevant item for each user
+    - k: int, rank position for NDCG
+
     Returns:
-        torch.Tensor: NDCG at k.
+    - ndcg: NDCG score at K for the batch
     """
-    pred = pred[:, :k]
-    target = target.unsqueeze(-1)
-    hit_matrix = (pred == target).float()
-    dcg = (hit_matrix / torch.log2(torch.arange(k, device=pred.device).float() + 2)).sum(dim=-1)
+    top_k_preds = pred[:, :k]
+    relevant_mask = top_k_preds == tgt[:, None]
+    dcg_scores = relevant_mask.astype(np.float32) / np.log2(np.arange(2, k + 2))
+    dcg = np.sum(dcg_scores, axis=1)
     idcg = 1.0
     ndcg = dcg / idcg
-    return torch.mean(ndcg).detach().cpu().numpy()
+    return np.mean(ndcg)
 
-def recall_at_k(pred, target, k):
+def recall_at_k(pred, tgt, k):
     """
-    Compute Recall at k.
-    
+    Calculate Recall at K using NumPy.
+
     Args:
-        pred (torch.Tensor): Tensor containing predicted item. shape: (batch_size, n_items) start from 1
-        target (torch.Tensor): Tensor containing ground truth item. shape: (batch_size,) start from 1
-        k (int): The rank to compute Recall at.
-    
+    - pred: Array of shape [B, K], predicted ranking for each user
+    - tgt: Array of shape [B], ground truth relevant item for each user
+    - k: int, rank position for recall
+
     Returns:
-        torch.Tensor: Recall at k.
+    - recall: Recall score at K for the batch
     """
-    pred = pred[:, :k]
-    target = target.unsqueeze(-1)
-    hit_matrix = (pred == target).float()
-    recall = hit_matrix.sum(dim=-1)
-    return torch.mean(recall).detach().cpu().numpy()
+    top_k_preds = pred[:, :k]
+    relevant_mask = np.any(top_k_preds == tgt[:, None], axis=1)
+    recall = relevant_mask.astype(np.float32)
+    return np.mean(recall)

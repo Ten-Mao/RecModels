@@ -140,3 +140,15 @@ class SeqRecDataset(Dataset):
     
     def get_user_num(self):
         return len(self.inters)
+
+
+class IDDataset(Dataset):
+    def __init__(self, num_items):
+        self.data = np.arange(1, 1 + num_items).reshape(-1, 1)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        """Index is to compute cf embedding"""
+        return self.data[index]

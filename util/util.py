@@ -37,3 +37,38 @@ def ensure_dir(dir_path):
     if dir_path and not os.path.exists(dir_path):
         print(f"Creating folders: {dir_path}")
         os.makedirs(dir_path)
+
+class Trie:
+
+    def __init__(self, seqs):
+        self.root = {}
+        for seq in seqs:
+            self.insert(seq)
+        
+    
+    def insert(self, seq):
+        node = self.root
+        for word in seq:
+            if word not in node:
+                node[word] = {}
+            node = node[word]
+    
+    def select_fit_prefix(
+        self,
+        prefix,
+    ):
+        node = self.root
+        if len(prefix) == 0:
+            return list(node.keys())
+        for word in prefix:
+            if word not in node:
+                return []
+            node = node[word]
+        return list(node.keys())
+
+def get_prefix_allowed_tokens_fn(trie):
+    def prefix_allowed_tokens_fn(batch_id, sentence):
+        sentence = sentence.tolist()
+        trie_out = trie.select_fit_prefix(sentence)
+        return trie_out
+    return prefix_allowed_tokens_fn

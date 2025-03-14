@@ -424,6 +424,8 @@ class RQVAE(nn.Module):
         )
         self.decoder = MLPLayers(in_dims[::-1], activation_fn="relu", last_activation=False)
 
+        self.item_indices = None
+
     @torch.no_grad()
     def kmeans_init(self):
         if not self.kmeans_init_open:
@@ -432,10 +434,12 @@ class RQVAE(nn.Module):
         x_in = self.encoder(self.item_emb.weight[1:]) # [N, in_dims[-1]]
         self.rq.kmeans_init(x_in)
 
+    @torch.no_grad()
     def update_labels(self):
         if self.diversity_loss_open:
             self.rq.update_labels()
 
+    @torch.no_grad()
     def compute_unique_key_ratio(self):
         x_in = self.encoder(self.item_emb.weight[1:]) # [N, in_dims[-1]]
         _, item_indices, _ = self.rq.inference(x_in)
@@ -446,6 +450,68 @@ class RQVAE(nn.Module):
             inverse_map[key].append(i)
         print(
             f"Unique key number: {len(inverse_map)}, ratio: {len(inverse_map)/(len(item_indices))}."
+        )
+
+    @torch.no_grad()
+    def get_all_indices(self):
+        return self.item_indices
+    
+    def set_all_indices(self):
+
+        def get_collision_item(all_indices_str):
+            indexstr2id = {}
+            for i, indexstr in enumerate(all_indices_str):
+                if indexstr not in indexstr2id:
+                    indexstr2id[indexstr] = []
+                indexstr2id[index].append(i + 1)
+
+            collision_item_groups = []
+
+            for index in indexstr2id:
+                if len(indexstr2id[index]) > 1:
+                    collision_item_groups.append(indexstr2id[index])
+
+            return collision_item_groups
+
+
+
+        x_in = self.encoder(self.item_emb.weight[1:])
+        _, item_indices, _ = self.rq.inference(x_in)
+        item_indices = item_indices.cpu().numpy() # [N, codebook_num]
+        prefix = ["<a_{}>","<b_{}>","<c_{}>","<d_{}>","<e_{}>","<f_{}>"]
+        item_indices_str = []
+        for i, indices in enumerate(item_indices):
+            item_indices_str.append(",".join([prefix[j].format(indices[j]) for j in range(len(indices))]))
+        
+        sinkhorn_open = self.sinkhorn_open
+        sinkhorn_epsilons = self.sinkhorn_epsilons
+
+        self.sinkhorn_epsilons = [0.0, 0.0, 0.0, 0.003]
+        for i, vq in  enumerate(self.rq.codebooks):
+            vq.sinkhorn_open = True
+            vq.sinkhorn_epsilon = self.sinkhorn_epsilons[i]
+        
+        iter_num = 20
+        while iter_num > 0 and len(item_indices) != len(set(item_indices_str)):
+            collision_item_groups = get_collision_item(item_indices_str)
+            for collision_group in collision_item_groups:
+                _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))[1]
+                new_indices = new_indices.cpu().numpy()
+                for i, new_index in enumerate(new_indices):
+                    item_indices_str[collision_group[i] - 1] = ",".join([prefix[j].format(new_index[j]) for j in range(len(new_index))])
+                    item_indices[collision_group[i] - 1] = new_index
+            iter_num -= 1
+        
+        self.sinkhorn_epsilons = sinkhorn_epsilons
+        for i, vq in  enumerate(self.rq.codebooks):
+            vq.sinkhorn_open = sinkhorn_open
+            vq.sinkhorn_epsilon = sinkhorn_epsilons[i]
+        
+        self.item_indices = torch.tensor(item_indices, dtype=torch.long, device=x_in.device)
+        self.item_indices = torch.cat([torch.zeros((1, self.item_indices.shape[1]), dtype=torch.long, device=self.item_indices.device), self.item_indices], dim=0) # [N+1, codebook_num]
+        
+        print(
+            f"Unique key number: {len(set(item_indices_str))}, ratio: {len(set(item_indices_str))/(len(item_indices) - 1)}."
         )
 
     def forward(self, x):
