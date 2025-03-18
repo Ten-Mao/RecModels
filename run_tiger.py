@@ -6,11 +6,12 @@ import random
 import time
 from torch.utils.data import DataLoader
 import numpy as np
+import pandas as pd
 import torch
 from torch import nn
 
 from data.dataset import IDDataset, SeqRecDataset
-from layers import T54Rec
+from layers.T54Rec import T54Rec
 from transformers.models.t5.configuration_t5 import T5Config
 from layers.Rqvae import RQVAE
 from torch.optim.lr_scheduler import LambdaLR
@@ -37,17 +38,17 @@ def parser_args():
     parser.add_argument("--in_dims", type=list, default=[4096, 2048, 1024, 512, 256, 128, 64, 32])
     parser.add_argument("--codebook_dim", type=int, default=32)
     parser.add_argument("--codebook_sizes", type=list, default=[256, 256, 256, 256])
+    parser.add_argument("--rqvae_dropout", type=float, default=0)
     parser.add_argument("--sinkhorn_open", action="store_true")
     parser.add_argument("--sinkhorn_epsilons", type=list, default=[0.0, 0.0, 0.0, 0.003])
     parser.add_argument("--sinkhorn_iter", type=int, default=50)
-    parser.add_argument("--kmeans_init_open", action="store_true")
     parser.add_argument("--mu", type=float, default=0.25)
 
     # rqvae train and eval
     parser.add_argument("--rqvae_epochs", type=int, default=20000)
     parser.add_argument("--rqvae_batch_size", type=int, default=1024)
     parser.add_argument("--rqvae_lr", type=float, default=1e-3)
-    parser.add_argument("--rqvae_wd", type=float, default=1e-2)
+    parser.add_argument("--rqvae_wd", type=float, default=1e-4)
     parser.add_argument("--rqvae_optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--rqvae_eval_step", type=int, default=2000)
     parser.add_argument("--rqvae_eval_metric", choices=["unique_key_ratio"], default="unique_key_ratio")
@@ -61,7 +62,6 @@ def parser_args():
     parser.add_argument("--t54rec_train_batch_size", type=int, default=256)
     parser.add_argument("--t54rec_valid_batch_size", type=int, default=64)
     parser.add_argument("--t54rec_test_batch_size", type=int, default=64)
-    parser.add_argument("--beam_size", type=int, default=20)
     parser.add_argument("--max_len", type=int, default=20)
     parser.add_argument("--t54rec_lr", type=float, default=5e-4)
     parser.add_argument("--t54rec_wd", type=float, default=1e-2)
@@ -72,6 +72,10 @@ def parser_args():
     parser.add_argument("--t54rec_early_stop_step", type=int, default=20)
     parser.add_argument("--t54rec_eval_metric", choices=["loss"], default="loss")
     parser.add_argument("--beam_size", type=int, default=20)
+
+    # test
+    parser.add_argument("--metrics", nargs="+", choices=["Recall", "NDCG"], default=["Recall", "NDCG"])
+    parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
 
     # log, save and result
     parser.add_argument("--log_root_path", type=str, default="./log/")
@@ -120,8 +124,6 @@ def parser_args():
             "t54rec_train_batch_size",
             "t54rec_early_stop_step",
             "beam_size",
-
-            "time",
         ]
     )
 
@@ -191,25 +193,24 @@ def initial_dataLoader(args):
     return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
-    rqvae = RQVAE(
-        item_emb_path=f"{args.data_path}/{args.dataset}/{args.dataset}.emb-llama-td.npy",
-        in_dims=args.in_dims,
-        codebook_dim=args.codebook_dim,
-        codebook_sizes=args.codebook_sizes,
-        sinkhorn_open=args.sinkhorn_open,
-        sinkhorn_epsilons=args.sinkhorn_epsilons,
-        sinkhorn_iter=args.sinkhorn_iter,
-        kmeans_init_open=args.kmeans_init_open,
-        mu=args.mu
-    ).to(device)
-
     rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-{args.rqvae_select_position}.pth"
 
     if not os.path.exists(rqvae_state_path):
-        fit_rqvae(args, rqvae)
+        rqvae = RQVAE(
+            item_emb_path=f"{args.data_path}/{args.dataset}/{args.dataset}.emb-llama-td.npy",
+            in_dims=args.in_dims,
+            codebook_dim=args.codebook_dim,
+            codebook_sizes=args.codebook_sizes,
+            dropout=args.rqvae_dropout,
+            sinkhorn_open=args.sinkhorn_open,
+            sinkhorn_epsilons=args.sinkhorn_epsilons,
+            sinkhorn_iter=args.sinkhorn_iter,
+            mu=args.mu
+        ).to(device)
+        fit_rqvae(args, rqvae, device)
 
     assert os.path.exists(rqvae_state_path)
-    rqvae.load_state_dict(torch.load(rqvae_state_path))
+    rqvae = torch.load(rqvae_state_path, weights_only=False)
     rqvae = rqvae.to(device)
 
     # freeze rqvae
@@ -271,7 +272,8 @@ def initial_optimizer_scheduler(
 
 def fit_rqvae(
     args,
-    rqvae
+    rqvae,
+    device
 ):
     print("Fitting RQVAE")
 
@@ -297,8 +299,7 @@ def fit_rqvae(
         len(id_dataloader),
         "none"
     )
-    if rqvae.kmeans_init_open:
-        rqvae.kmeans_init()
+    rqvae.kmeans_init()
 
     rqvae.train()
 
@@ -308,7 +309,7 @@ def fit_rqvae(
         recon_loss_list = []
         quant_loss_list = []
         for _, batch in enumerate(id_dataloader):
-            batch = batch.to(rqvae.device)
+            batch = batch.to(device)
             _, _, _, loss, recon_loss, quant_loss, _ = rqvae(batch)
             optimizer.zero_grad()
             loss.backward()
@@ -325,17 +326,16 @@ def fit_rqvae(
             print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {1 - unique_ratio}")
             if unique_ratio > max_unique_ratio:
                 max_unique_ratio = unique_ratio
-                torch.save(rqvae.state_dict(), f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+                torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
     
     # save last
     rqvae.set_all_indices()
-    torch.save(rqvae.state_dict(), f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
+    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
 
     # save best
-    rqvae.load_state_dict(torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth"))
+    rqvae = torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth", weights_only=False)
     rqvae.set_all_indices()
-    torch.save(rqvae.state_dict(), f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
-
+    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
 
 def prepare_input(
     his_seqs,
@@ -359,20 +359,20 @@ def prepare_input(
         .reshape(1, decoder_input_ids.shape[-1])
         .to(decoder_input_ids.device)
     )
-    encoder_input_ids = (encoder_input_ids + encoder_shift) # [batch_size, max_len, codebook_num]
-    decoder_input_ids = decoder_input_ids + decoder_shift # [batch_size, codebook_num]
+    encoder_input_ids = (encoder_input_ids + encoder_shift).long() # [batch_size, max_len, codebook_num]
+    decoder_input_ids = (decoder_input_ids + decoder_shift).long() # [batch_size, codebook_num]
 
 
     # write pad to encoder_input_ids
-    pad_indices = (his_seqs == 0).nonzero(as_tuple=True)
-    encoder_input_ids[pad_indices[0], pad_indices[1]] = torch.tensor([0] * encoder_input_ids.shape[-1]).to(encoder_input_ids.device)
+    pad_indices = (his_seqs == 0).long().nonzero(as_tuple=True)
+    encoder_input_ids[pad_indices[0], pad_indices[1]] = torch.zeros(encoder_input_ids.shape[-1], dtype=torch.long).to(encoder_input_ids.device)
     encoder_input_ids = encoder_input_ids.reshape(encoder_input_ids.shape[0], -1) # [batch_size, max_len*codebook_num]
 
     # add eos to encoder_input_ids
     encoder_input_ids = torch.cat(
         [
             encoder_input_ids, 
-            torch.ones((encoder_input_ids.shape[0], 1)).to(encoder_input_ids.device)
+            torch.ones((encoder_input_ids.shape[0], 1), dtype=torch.long).to(encoder_input_ids.device)
         ], 
         dim=-1
     ) # [batch_size, max_len*codebook_num + 1]
@@ -381,7 +381,7 @@ def prepare_input(
     labels = torch.cat(
         [
             decoder_input_ids,
-            torch.ones((decoder_input_ids.shape[0], 1)).to(encoder_input_ids.device),
+            torch.ones((decoder_input_ids.shape[0], 1), dtype=torch.long).to(encoder_input_ids.device),
         ],
         dim=-1
     ) # [batch_size, codebook_num + 1]
@@ -389,7 +389,7 @@ def prepare_input(
     # add decoder_input_token to decoder_input_ids
     decoder_input_ids = torch.cat(
         [
-            torch.zeros((decoder_input_ids.shape[0], 1)).to(encoder_input_ids.device),
+            torch.zeros((decoder_input_ids.shape[0], 1), dtype=torch.long).to(encoder_input_ids.device),
             decoder_input_ids
         ],
         dim=-1
@@ -398,7 +398,6 @@ def prepare_input(
     encoder_mask = (encoder_input_ids != 0).int() # [batch_size, max_len*codebook_num + 1]
 
     return encoder_input_ids, encoder_mask, decoder_input_ids, labels, shift
-
 
 def train_epoch(
     epoch, 
@@ -516,7 +515,7 @@ def test(
         metric: {k: [] for k in args.topk}
         for metric in args.metrics
     }
-
+    data_num = 0
     for step, batch in enumerate(test_loader):
         batch = {k: v.to(device) for k, v in batch.items()}
         his_seqs = batch["his_seqs"]
@@ -534,13 +533,14 @@ def test(
             indice_matrix
         )
 
-        item_indices = (indice_matrix.weight[1:] + shift).cpu().numpy()
+        item_indices = (indice_matrix.weight[1:] + shift).long().cpu().numpy()
         output_ids = model._inference(
             input_ids=encoder_input_ids,
             attention_mask=encoder_mask,
             item_indices=item_indices,
             beam_size=args.beam_size
         )
+        output_ids = output_ids.cpu().numpy()
         tgt_ids = labels[:, :-1].cpu().numpy()
 
         tgt = np.array([".".join(map(str, x)) for x in tgt_ids])
@@ -589,7 +589,6 @@ def save_test_result(result, args, model_result_path):
 
 def run():
     args = parser_args()
-
     # set seed
     set_seed(args)
 
@@ -635,16 +634,15 @@ def run():
     ensure_dir(save_dir_path)
     ensure_file(model_result_file_path, args.params_in_model_result)
 
-
-    best_valid_metric = math.inf if args.eval_metric == "loss" else math.inf * -1
+    best_valid_metric = math.inf if args.t54rec_eval_metric == "loss" else math.inf * -1
     best_epoch = -1
     patience = 0
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.t54rec_epochs):
         train_epoch(epoch, t54rec, train_loader, indice_matrix, device, optimizer, scheduler)
-        if epoch % args.eval_step == 0:
-            valid_metric = eval_epoch(epoch, t54rec, valid_loader, indice_matrix, device, args.eval_metric)
-            if args.eval_metric == "loss":
+        if epoch % args.t54rec_eval_step == 0:
+            valid_metric = eval_epoch(epoch, t54rec, valid_loader, indice_matrix, device, args.t54rec_eval_metric)
+            if args.t54rec_eval_metric == "loss":
                 if valid_metric < best_valid_metric:
                     patience = 0
                     best_valid_metric = valid_metric
@@ -653,14 +651,14 @@ def run():
                     print(f"Save model at epoch [{epoch + 1}]")
                 else:
                     patience += 1
-                    print(f"Patience: {patience}/{args.early_stop_step}")
-                    if patience >= args.early_stop_step:
+                    print(f"Patience: {patience}/{args.t54rec_early_stop_step}")
+                    if patience >= args.t54rec_early_stop_step:
                         print(f"Early stop at epoch [{epoch + 1}]")
                         break
             else:
                 raise ValueError("Invalid eval metric.")
             
-    print(f"Best epoch: {best_epoch + 1}, Best valid {args.eval_metric}: {best_valid_metric:.4f}")
+    print(f"Best epoch: {best_epoch + 1}, Best valid {args.t54rec_eval_metric}: {best_valid_metric:.4f}")
 
     t54rec.load_state_dict(torch.load(save_file_path, weights_only=True))
     test_metric = test(t54rec, test_loader, indice_matrix, device, args)

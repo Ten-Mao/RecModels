@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Literal
 import pandas as pd
@@ -26,7 +27,7 @@ class SeqRecDataset(Dataset):
         self.max_len = max_len
         self.mode = mode
 
-        self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.csv")
+        self.inter_path = os.path.join(data_root_path, dataset, f"{dataset}.inter.json")
         assert os.path.exists(self.inter_path), f"Inter file not found in {self.inter_path}"
 
         self.inters = self._load_inter(self.inter_path)
@@ -60,14 +61,7 @@ class SeqRecDataset(Dataset):
         return sample
 
     def _load_inter(self, inter_path):
-        inters = {}
-        inter_df = pd.read_csv(inter_path)
-        for row in inter_df.itertuples():
-            user_id = getattr(row, "user_id")
-            item_id = getattr(row, "item_id")
-            if user_id not in inters:
-                inters[user_id] = []
-            inters[user_id].append(item_id)
+        inters = json.load(open(inter_path, "r"))
         return inters
 
     def _process_train_data(self):
@@ -85,7 +79,7 @@ class SeqRecDataset(Dataset):
                     seq = seq[-self.max_len:]
                 
                 sample = {
-                    "user_seqs": np.array(user_id),
+                    "user_seqs": np.array(int(user_id)),
                     "his_seqs": np.array(seq),
                     "next_items": np.array(target),
                 }
@@ -107,7 +101,7 @@ class SeqRecDataset(Dataset):
                 seq = seq[-self.max_len:]
 
             sample = {
-                "user_seqs": np.array(user_id),
+                "user_seqs": np.array(int(user_id)),
                 "his_seqs": np.array(seq),
                 "next_items": np.array(target),
             }
@@ -128,7 +122,7 @@ class SeqRecDataset(Dataset):
                 seq = seq[-self.max_len:]
 
             sample = {
-                "user_seqs": np.array(user_id),
+                "user_seqs": np.array(int(user_id)),
                 "his_seqs": np.array(seq),
                 "next_items": np.array(target),
             }
@@ -144,7 +138,7 @@ class SeqRecDataset(Dataset):
 
 class IDDataset(Dataset):
     def __init__(self, num_items):
-        self.data = np.arange(1, 1 + num_items).reshape(-1, 1)
+        self.data = np.arange(1, 1 + num_items)
 
     def __len__(self):
         return len(self.data)

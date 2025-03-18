@@ -7,7 +7,6 @@ import numpy as np
 from layers.FeedForward import FeedForward
 from layers.LayerNorm import LayerNorm
 from layers.MultiHeadAttention import MultiHeadAttention
-from util.loss import BPRLoss, CELoss
 
 class Bert4Rec(nn.Module):
     def __init__(

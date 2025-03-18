@@ -1,5 +1,6 @@
+import copy
 from typing import Optional, Tuple
-from numpy import copy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

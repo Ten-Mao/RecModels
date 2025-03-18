@@ -42,8 +42,9 @@ class MLPLayers(nn.Module):
     
     def init_weights(self, module):
         if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight.data)
             if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
+                module.bias.data.fill_(0.0)
 
 
     def get_activation_fn(self, activation):

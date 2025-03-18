@@ -42,7 +42,7 @@ def parser_args():
     parser.add_argument("--test_batch_size", type=int, default=256)
     parser.add_argument("--max_len", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--wd", type=float, default=1e-2)
+    parser.add_argument("--wd", type=float, default=1e-4)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
     parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
@@ -183,7 +183,7 @@ def initial_optimizer_scheduler(args, model, batchnum_per_epoch):
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=args.lr,
-            weight_decay=args.weight_decay
+            weight_decay=args.wd
         )
     else:
         raise ValueError("Invalid optimizer.")
@@ -275,8 +275,10 @@ def eval_epoch(
             batch = {k: v.to(device) for k, v in batch.items()}
             scores = model.inference(batch)
             _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            pred = (indices + 1).cpu().numpy()
+            tgt = batch["next_items"].cpu().numpy()
             metric_values.append(
-                recall_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+                recall_at_k(pred, tgt, 5) * batch["next_items"].shape[0]
             )
             value_num += batch["next_items"].shape[0]
         valid_metric = np.sum(metric_values) / value_num
@@ -288,8 +290,10 @@ def eval_epoch(
             batch = {k: v.to(device) for k, v in batch.items()}
             scores = model.inference(batch)
             _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            pred = (indices + 1).cpu().numpy()
+            tgt = batch["next_items"].cpu().numpy()
             metric_values.append(
-                ndcg_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+                ndcg_at_k(pred, tgt, 5) * batch["next_items"].shape[0]
             )
             value_num += batch["next_items"].shape[0]
         valid_metric = np.sum(metric_values) / value_num

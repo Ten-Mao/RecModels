@@ -1,0 +1,1 @@
+nohup python -u run_gru4rec.py --device cuda:0 --dataset Beauty2014 --d_model 128 --inner_dim 256 --lr 1e-3  --wd 5e-1 --num_layers 2 > log/Beauty2014/gru4rec-d_model_128-inner_dim_256-lr_1e-3-wd_5e-1-num_layers_2.log 2>&1 &

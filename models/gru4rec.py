@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from util.loss import BPRLoss, CELoss
-
 class Gru4Rec(nn.Module):
     def __init__(
         self, 

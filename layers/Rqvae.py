@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from k_means_constrained import KMeansConstrained
-from layers import MLPLayers
+from layers.MLPLayers import MLPLayers
 
 
 class VectorQuantier(nn.Module):
@@ -21,11 +21,7 @@ class VectorQuantier(nn.Module):
         sinkhorn_iter: int=50,
 
         diversity_loss_open: bool=False,
-        kmeans_init_open: bool=False,
         kmeans_cluster: int=10,
-
-
-
 
         mu: float=0.25,
         beta: float=0.0001,
@@ -35,7 +31,7 @@ class VectorQuantier(nn.Module):
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
         self.codebook = nn.Embedding(codebook_size, codebook_dim)
-        self.labels = torch.arange(codebook_size)
+        self.labels = torch.arange(codebook_size).tolist()
 
 
         self.sinkhorn_open = sinkhorn_open
@@ -43,7 +39,6 @@ class VectorQuantier(nn.Module):
         self.sinkhorn_iter = sinkhorn_iter
 
         self.diversity_loss_open = diversity_loss_open
-        self.kmeans_init_open = kmeans_init_open
         self.kmeans_cluster = kmeans_cluster
 
 
@@ -52,80 +47,76 @@ class VectorQuantier(nn.Module):
     
     def kmeans_init(self, x):
         # x: [N, codebook_dim]
-        if not self.kmeans_init_open:
-            print("kmeans_init_open is False, no need to init kmeans")
-            return
         size_min = min(x.shape[0] // (self.codebook_size * 2), 50)
+        x_ = x.detach().cpu().numpy()
         try:
             clf = KMeansConstrained(
                 n_clusters=self.codebook_size,
                 size_min=size_min, 
                 size_max=size_min * 4, 
-                max_iter=10, 
+                max_iter=100, 
                 n_init=10,
                 n_jobs=10, 
                 verbose=False
             )
-            clf.fit(x)
+            clf.fit(x_)
         except Exception as e:
             print("KMeansConstrained Error when kmeans_init: ", e)
             clf = KMeansConstrained(
                 n_clusters=self.codebook_size,
                 size_min=size_min, 
                 size_max=size_min * 4, 
-                max_iter=10, 
+                max_iter=100, 
                 n_init=10,
                 n_jobs=10, 
                 verbose=False
             )
-            clf.fit(x)
+            clf.fit(x_)
         self.codebook.weight.data.copy_(torch.tensor(clf.cluster_centers_, dtype=torch.float32))
-        self.labels = torch.tensor(clf.labels_, dtype=torch.long)
 
         quant, _, _ = self.inference(x)
         return quant
 
     def update_labels(self):
-        if self.diversity_loss_open:
-            size_min = min(self.codebook_size // (self.kmeans_cluster * 2), 10)
-            try:
-                clf = KMeansConstrained(
-                    n_clusters=self.kmeans_cluster,
-                    size_min=size_min, 
-                    size_max=size_min * 6, 
-                    max_iter=10, 
-                    n_init=10,
-                    n_jobs=10, 
-                    verbose=False
-                )
-                clf.fit(self.codebook.weight)
-            except Exception as e:
-                print("KMeansConstrained Error when kmeans_init: ", e)
-                clf = KMeansConstrained(
-                    n_clusters=self.kmeans_cluster,
-                    size_min=size_min, 
-                    size_max=size_min * 6, 
-                    max_iter=10, 
-                    n_init=10,
-                    n_jobs=10, 
-                    verbose=False
-                )
-                clf.fit(self.codebook.weight)
-            self.codebook.weight.data.copy_(torch.tensor(clf.cluster_centers_, dtype=torch.float32))
-            self.labels = torch.tensor(clf.labels_, dtype=torch.long)
-
+        size_min = min(self.codebook_size // (self.kmeans_cluster * 2), 10)
+        x_ = self.codebook.weight.detach().cpu().numpy()
+        try:
+            clf = KMeansConstrained(
+                n_clusters=self.kmeans_cluster,
+                size_min=size_min, 
+                size_max=size_min * 6, 
+                max_iter=10, 
+                n_init=10,
+                n_jobs=10, 
+                verbose=False
+            )
+            clf.fit(x_)
+        except Exception as e:
+            print("KMeansConstrained Error when kmeans_init: ", e)
+            clf = KMeansConstrained(
+                n_clusters=self.kmeans_cluster,
+                size_min=size_min, 
+                size_max=size_min * 6, 
+                max_iter=10, 
+                n_init=10,
+                n_jobs=10, 
+                verbose=False
+            )
+            clf.fit(x_)
+        self.labels = torch.tensor(clf.labels_, dtype=torch.long).tolist()
 
     def forward(self, x):
         # x [N, codebook_dim]
-        d2term = (torch.sum(x**2, dim=-1, keepdim=True)
+        d2term = (
+            torch.sum(x**2, dim=-1, keepdim=True)
             + torch.sum(self.codebook.weight**2, dim=-1, keepdim=True).t()
             - 2 * torch.matmul(x, self.codebook.weight.t())
         ) # [N, codebook_size]
 
         if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
             # Sinkhorn normalization -> [-1, 1]
-            max_d = torch.max(d2term, dim=-1, keepdim=True)
-            min_d = torch.min(d2term, dim=-1, keepdim=True)
+            max_d = d2term.max()
+            min_d = d2term.min()
             mid_d = (max_d + min_d) / 2
             d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-8)
             d2term_normed = d2term_normed.double()
@@ -134,25 +125,27 @@ class VectorQuantier(nn.Module):
             d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
             B = d2term_standard.shape[0]
             K = d2term_standard.shape[1] 
-            d2term_standard = d2term_standard / d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True)
+            d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
 
             for _ in range(self.sinkhorn_iter):
-                # column normalization
-                d2term_standard = d2term_standard / d2term_standard.sum(dim=0, keepdim=True)
-                d2term_normed /= K
-
                 # row normalization
-                d2term_standard = d2term_standard / d2term_standard.sum(dim=1, keepdim=True)
-                d2term_normed /= B
-            
-            d2term_normed *= B
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True) + 1e-8)
+                d2term_standard /= B
 
-            probs = d2term_normed # [batch_size, codebook_size]
+                # column normalization
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True) + 1e-8)
+                d2term_standard /= K
+
+
+            
+            d2term_standard *= B
+
+            probs = d2term_standard # [batch_size, codebook_size]
             indices = torch.argmax(probs, dim=-1) # [batch_size]
         
         else:
             probs = F.softmax(-d2term, dim=-1)
-            indices = torch.argmax(probs, dim=-1)
+            indices = torch.argmax(-d2term, dim=-1)
         
         quant_hard = self.codebook(indices) # [N, codebook_dim]
         quant = (quant_hard - x).detach() + x # [N, codebook_dim]
@@ -167,9 +160,11 @@ class VectorQuantier(nn.Module):
 
             # 计算每一个cluster对应物品集进行码表对应后的term index list
             cluster_index_list = {}
-            for idx, idx_cluster in enumerate(cluster_indices):
-                cluster_index_list[idx_cluster] = cluster_index_list.get(idx_cluster, []) + [indices[idx]]
-            
+            for cluster in range(self.kmeans_cluster):
+                cluster_index_list[cluster] = [
+                    index for index, index_cluster in enumerate(self.labels) if index_cluster == cluster
+                ]
+
             # 计算每一个item对应的cluster的 term index list
             index_pos_list = [cluster_index_list[cluster] for cluster in cluster_indices]
 
@@ -200,15 +195,16 @@ class VectorQuantier(nn.Module):
     @torch.no_grad()
     def inference(self, x):
         # x [N, codebook_dim]
-        d2term = (torch.sum(x**2, dim=-1, keepdim=True)
+        d2term = (
+            torch.sum(x**2, dim=-1, keepdim=True)
             + torch.sum(self.codebook.weight**2, dim=-1, keepdim=True).t()
             - 2 * torch.matmul(x, self.codebook.weight.t())
         )
 
         if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
             # Sinkhorn normalization -> [-1, 1]
-            max_d = torch.max(d2term, dim=-1, keepdim=True)
-            min_d = torch.min(d2term, dim=-1, keepdim=True)
+            max_d = d2term.max()
+            min_d = d2term.min()
             mid_d = (max_d + min_d) / 2
             d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-8)
             d2term_normed = d2term_normed.double()
@@ -217,25 +213,25 @@ class VectorQuantier(nn.Module):
             d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
             B = d2term_standard.shape[0]
             K = d2term_standard.shape[1] 
-            d2term_standard = d2term_standard / d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True)
+            d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
 
             for _ in range(self.sinkhorn_iter):
-                # column normalization
-                d2term_standard = d2term_standard / d2term_standard.sum(dim=0, keepdim=True)
-                d2term_normed /= K
-
                 # row normalization
-                d2term_standard = d2term_standard / d2term_standard.sum(dim=1, keepdim=True)
-                d2term_normed /= B
-            
-            d2term_normed *= B
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True) + 1e-8)
+                d2term_standard /= B
 
-            probs = d2term_normed # [batch_size, codebook_size]
+                # column normalization
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True) + 1e-8)
+                d2term_standard /= K
+            
+            d2term_standard *= B
+
+            probs = d2term_standard # [batch_size, codebook_size]
             indices = torch.argmax(probs, dim=-1) # [batch_size]
         
         else:
             probs = F.softmax(-d2term, dim=-1)
-            indices = torch.argmax(probs, dim=-1)
+            indices = torch.argmax(-d2term, dim=-1)
 
         quant_hard = self.codebook(indices) # [N, codebook_dim]
         quant = (quant_hard - x).detach() + x # [N, codebook_dim]
@@ -256,7 +252,6 @@ class ResidualVectorQuantier(nn.Module):
         sinkhorn_iter: int=50,
 
         diversity_loss_open: bool=False,
-        kmeans_init_open: bool=False,
         kmeans_cluster: int=10,
 
         mu: float=0.25,
@@ -272,7 +267,6 @@ class ResidualVectorQuantier(nn.Module):
         self.sinkhorn_iter = sinkhorn_iter
 
         self.diversity_loss_open = diversity_loss_open
-        self.kmeans_init_open = kmeans_init_open
         self.kmeans_cluster = kmeans_cluster
 
         self.mu = mu
@@ -286,7 +280,6 @@ class ResidualVectorQuantier(nn.Module):
                 sinkhorn_epsilon=sinkhorn_epsilon_i,
                 sinkhorn_iter=self.sinkhorn_iter,
                 diversity_loss_open=self.diversity_loss_open,
-                kmeans_init_open=self.kmeans_init_open,
                 kmeans_cluster=self.kmeans_cluster,
                 mu=self.mu,
                 beta=self.beta
@@ -297,18 +290,15 @@ class ResidualVectorQuantier(nn.Module):
 
     def kmeans_init(self, x):
         # x: [N, codebook_dim]
-        if not self.kmeans_init_open:
-            print("kmeans_init_open is False, no need to init kmeans")
-            return
         residual = x
         for codebook_i in self.codebooks:
             x_q = codebook_i.kmeans_init(residual)
             residual = residual - x_q
 
     def update_labels(self):
-        if self.diversity_loss_open:
-            for codebook_i in self.codebooks:
-                codebook_i.update_labels()
+        for codebook_i in self.codebooks:
+            codebook_i.update_labels()
+
     
     def forward(self, x):
         # x [N, codebook_dim]
@@ -357,11 +347,12 @@ class RQVAE(nn.Module):
     def __init__(
         self,
         item_emb_path: str="data/Beauty2014/Beauty2014.emb-llama-td.npy",
-        cf_emb_path: str="data/Beauty2014/Beauty2014-32d-sasrec.pt",
+        cf_emb_path: str="data/Beauty2014/Beauty2014-cf_emb.pt",
 
         in_dims: List[int]=[4096, 2048, 1024, 512, 256, 128, 64, 32],
         codebook_dim: int=32,
         codebook_sizes: List[int]=[256, 256, 256, 256],
+        dropout: float=0,
 
         sinkhorn_open: bool=True,
         sinkhorn_epsilons: List[float]=[0.0, 0.0, 0.0, 0.003],
@@ -369,7 +360,6 @@ class RQVAE(nn.Module):
 
         cf_loss_open: bool=False,
         diversity_loss_open: bool=False,
-        kmeans_init_open: bool=False,
         kmeans_cluster: int=10,
 
         mu: float=0.25,
@@ -381,6 +371,7 @@ class RQVAE(nn.Module):
         self.in_dims = in_dims
         self.codebook_dim = codebook_dim
         self.codebook_sizes = codebook_sizes
+        self.dropout = dropout
 
         self.sinkhorn_open = sinkhorn_open
         self.sinkhorn_epsilons = sinkhorn_epsilons
@@ -388,7 +379,6 @@ class RQVAE(nn.Module):
 
         self.cf_loss_open = cf_loss_open
         self.diversity_loss_open = diversity_loss_open
-        self.kmeans_init_open = kmeans_init_open
         self.kmeans_cluster = kmeans_cluster
 
         self.mu = mu
@@ -398,7 +388,7 @@ class RQVAE(nn.Module):
         self.padding_idx = 0
         self.item_emb_data = np.load(item_emb_path)
         self.item_emb_data = np.concatenate([np.zeros((1, self.item_emb_data.shape[1])), self.item_emb_data], axis=0)
-        self.item_emb = nn.Embedding(self.item_emb_data.shape[0] + 1, self.in_dims[0], padding_idx=self.padding_idx)
+        self.item_emb = nn.Embedding(self.item_emb_data.shape[0], self.in_dims[0], padding_idx=self.padding_idx)
         self.item_emb.weight.data.copy_(torch.tensor(self.item_emb_data, dtype=torch.float32))
         self.item_emb.weight.requires_grad = False
 
@@ -409,7 +399,7 @@ class RQVAE(nn.Module):
             self.cf_emb.weight.requires_grad = False
 
 
-        self.encoder = MLPLayers(in_dims, activation_fn="relu", last_activation=False)
+        self.encoder = MLPLayers(in_dims, activation_fn="relu", last_activation=False, dropout=dropout)
         self.rq = ResidualVectorQuantier(
             codebook_sizes=self.codebook_sizes,
             codebook_dim=self.codebook_dim,
@@ -417,27 +407,22 @@ class RQVAE(nn.Module):
             sinkhorn_epsilons=self.sinkhorn_epsilons,
             sinkhorn_iter=self.sinkhorn_iter,
             diversity_loss_open=self.diversity_loss_open,
-            kmeans_init_open=self.kmeans_init_open,
             kmeans_cluster=self.kmeans_cluster,
             mu=self.mu,
             beta=self.beta
         )
-        self.decoder = MLPLayers(in_dims[::-1], activation_fn="relu", last_activation=False)
+        self.decoder = MLPLayers(in_dims[::-1], activation_fn="relu", last_activation=False, dropout=dropout)
 
         self.item_indices = None
 
     @torch.no_grad()
     def kmeans_init(self):
-        if not self.kmeans_init_open:
-            print("kmeans_init_open is False, no need to init kmeans")
-            return
         x_in = self.encoder(self.item_emb.weight[1:]) # [N, in_dims[-1]]
         self.rq.kmeans_init(x_in)
 
     @torch.no_grad()
     def update_labels(self):
-        if self.diversity_loss_open:
-            self.rq.update_labels()
+        self.rq.update_labels()
 
     @torch.no_grad()
     def compute_unique_key_ratio(self):
@@ -451,6 +436,7 @@ class RQVAE(nn.Module):
         print(
             f"Unique key number: {len(inverse_map)}, ratio: {len(inverse_map)/(len(item_indices))}."
         )
+        return len(inverse_map)/(len(item_indices))
 
     @torch.no_grad()
     def get_all_indices(self):
@@ -463,7 +449,7 @@ class RQVAE(nn.Module):
             for i, indexstr in enumerate(all_indices_str):
                 if indexstr not in indexstr2id:
                     indexstr2id[indexstr] = []
-                indexstr2id[index].append(i + 1)
+                indexstr2id[indexstr].append(i + 1)
 
             collision_item_groups = []
 
@@ -495,7 +481,7 @@ class RQVAE(nn.Module):
         while iter_num > 0 and len(item_indices) != len(set(item_indices_str)):
             collision_item_groups = get_collision_item(item_indices_str)
             for collision_group in collision_item_groups:
-                _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))[1]
+                _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))
                 new_indices = new_indices.cpu().numpy()
                 for i, new_index in enumerate(new_indices):
                     item_indices_str[collision_group[i] - 1] = ",".join([prefix[j].format(new_index[j]) for j in range(len(new_index))])
@@ -541,11 +527,9 @@ class RQVAE(nn.Module):
 
         if self.cf_loss_open and self.alpha > 0:
             x_cf_emb = self.cf_emb(x_reshape) # [N, in_dims[-1]]
-            sim = quant @ x_cf_emb.t() # [N, N]
-            label = torch.arange(quant.shape[0])
-            cf_loss = F.cross_entropy(sim, label, reduction="none") # [N]
-            cf_loss = cf_loss * mask
-            cf_loss = torch.sum(cf_loss) / torch.sum(mask)
+            sim = quant @ x_cf_emb[1:].t() # [N, N]
+            label = (x_reshape-1).detach()
+            cf_loss = F.cross_entropy(sim, label, ignore_index=-1) # [N]
             loss += self.alpha * cf_loss
         else:
             cf_loss = torch.tensor(0.0)
