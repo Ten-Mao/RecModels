@@ -8,12 +8,11 @@ import time
 import numpy as np
 import torch
 
-from data.dataset import GenRecDataset
+from data.dataset import SeqRecDataset
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR
-from models.general_recommender.lightgcn import LightGCN
+from models.lightgcn import LightGCN
 from util.evaluate import ndcg_at_k, recall_at_k
-from util.logger import Logger
 from util.util import ensure_dir, ensure_file
 import pandas as pd
 
@@ -26,27 +25,26 @@ def parser_args():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     # data
-    parser.add_argument("--data_path", type=str, default="../data/")
+    parser.add_argument("--data_path", type=str, default="./data/")
     parser.add_argument("--dataset", choices=["Beauty2014", "Yelp"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # model
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--num_layers", type=int, default=3)
-    parser.add_argument("--eps", type=float, default=1e-7)
-    parser.add_argument("--loss_type", choices=["bpr"], default="bpr")
+    parser.add_argument("--num_layers", type=int, default=2)
+    parser.add_argument("--dropout", type=float, default=0.1)
 
     # train and eval
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--train_batch_size", type=int, default=256)
     parser.add_argument("--valid_batch_size", type=int, default=256)
     parser.add_argument("--test_batch_size", type=int, default=256)
-    parser.add_argument("--pair_num_per_pos", type=int, default=100)
+    parser.add_argument("--max_len", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=1e-2)
+    parser.add_argument("--wd", type=float, default=1)
     parser.add_argument("--optimizer", choices=["adamw"], default="adamw")
-    parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--scheduler_type", choices=["cosine", "linear", "none"], default="none")
+    parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--eval_step", type=int, default=1)
     parser.add_argument("--early_stop_step", type=int, default=20)
     parser.add_argument("--eval_metric", choices=["Recall@5", "NDCG@5", "loss"], default="Recall@5")
@@ -56,7 +54,6 @@ def parser_args():
     parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
 
     # log, save and result
-    parser.add_argument("--log_root_path", type=str, default="./log/")
     parser.add_argument("--save_root_path", type=str, default="./save/")
     parser.add_argument("--result_root_path", type=str, default="./result/")
     parser.add_argument(
@@ -64,21 +61,19 @@ def parser_args():
         nargs="+", 
         default=[
             "seed",
+
             "d_model", 
             "num_layers",
-            "eps",
-            "loss_type",
+            "dropout",
 
             "epochs",
             "train_batch_size",
-            "valid_batch_size",
-            "test_batch_size",
-            "pair_num_per_pos",
+            "max_len",
             "lr",
-            "weight_decay",
+            "wd",
             "optimizer",
-            "warmup_ratio",
             "scheduler_type",
+            "warmup_ratio",
             "eval_step",
             "early_stop_step",
             "eval_metric",
@@ -91,19 +86,18 @@ def parser_args():
         ]
     )
     parser.add_argument(
-        "--params_in_all_model_result", 
+        "--params_in_model_save_title", 
         nargs="+", 
         default=[
-            "Model",
-            "Recall@5",
-            "NDCG@5",
-            "Recall@10",
-            "NDCG@10"
+            "d_model", 
+            "num_layers",  
+            "dropout",
+
+            "train_batch_size",
+            "lr",
+            "wd",
         ]
     )
-    parser.add_argument("--selected_best_model_metric", choices=["Recall@5", "NDCG@5", "Recall@10", "NDCG@10"], default="Recall@5")
-   
-
     return parser.parse_args()
 
 def set_seed(args):
@@ -114,36 +108,31 @@ def set_seed(args):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def seed_worker(worker_id):
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
-
 def get_device(args):
     return torch.device(args.device) if torch.cuda.is_available() else torch.device("cpu")
 
 def initial_dataLoader(args):
 
     datasets = {
-        "train": GenRecDataset(
+        "train": SeqRecDataset(
             data_root_path=args.data_path, 
-            dataset=args.dataset, 
+            dataset=args.dataset,
+            max_len=args.max_len, 
             mode="train", 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         ),
-        "valid": GenRecDataset(
+        "valid": SeqRecDataset(
             data_root_path=args.data_path, 
             dataset=args.dataset, 
+            max_len=args.max_len,
             mode="valid", 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         ),
-        "test": GenRecDataset(
+        "test": SeqRecDataset(
             data_root_path=args.data_path, 
             dataset=args.dataset, 
+            max_len=args.max_len,
             mode="test", 
-            pair_num_per_pos=args.pair_num_per_pos,
             seed=args.seed
         )
     }
@@ -154,7 +143,6 @@ def initial_dataLoader(args):
             batch_size=args.train_batch_size, 
             shuffle=True,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         ),
         "valid": DataLoader(
@@ -162,7 +150,6 @@ def initial_dataLoader(args):
             batch_size=args.valid_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         ),
         "test": DataLoader(
@@ -170,7 +157,6 @@ def initial_dataLoader(args):
             batch_size=args.test_batch_size, 
             shuffle=False,
             num_workers=args.num_workers,
-            worker_init_fn=seed_worker,
             pin_memory=True
         )
     }
@@ -191,8 +177,7 @@ def initial_model(args, interaction_matrix, device):
         args.d_model,
         interaction_matrix=interaction_matrix,
         num_layers=args.num_layers,
-        eps=args.eps,
-        loss_type=args.loss_type
+        dropout=args.dropout,
     ).to(device)
 
     return model
@@ -203,7 +188,7 @@ def initial_optimizer_scheduler(args, model, batchnum_per_epoch):
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=args.lr,
-            weight_decay=args.weight_decay
+            weight_decay=args.wd
         )
     else:
         raise ValueError("Invalid optimizer.")
@@ -241,11 +226,10 @@ def train_epoch(
     device,
     optimizer,
     scheduler,
-    logger
 ):
     model.train()
     total_loss = []
-    logger.log(f"Epoch [{epoch + 1}] - Start Training")
+    print(f"Epoch [{epoch + 1}] - Start Training")
     for step, batch in enumerate(train_loader):
         batch = {k: v.to(device) for k, v in batch.items()}
         loss = model(batch)
@@ -258,18 +242,18 @@ def train_epoch(
 
         if (step + 1) % 10 == 0:
             if scheduler is not None:
-                logger.log(
+                print(
                     f"Step [{step + 1}/{len(train_loader)}] - "
                     f"Avg Loss: {np.mean(total_loss):.4f}, "
                     f"Current lr: {scheduler.get_last_lr()[0]:.10f}"
                 )
             else:
-                logger.log(
+                print(
                     f"Step [{step + 1}/{len(train_loader)}] - "
                     f"Avg Loss: {np.mean(total_loss):.4f}"
                 )
     
-    logger.log(f"Epoch [{epoch + 1}] - Avg Loss: {np.mean(total_loss):.4f}")
+    print(f"Epoch [{epoch + 1}] - Avg Loss: {np.mean(total_loss):.4f}")
             
 @torch.no_grad()
 def eval_epoch(
@@ -278,18 +262,17 @@ def eval_epoch(
     valid_loader,
     eval_metric,
     device,
-    logger
 ):
     model.eval()
     total_loss = []
-    logger.log(f"Epoch [{epoch + 1}] - Start Evaluating")
+    print(f"Epoch [{epoch + 1}] - Start Evaluating")
     if eval_metric == "loss":
         for step, batch in enumerate(valid_loader):
             batch = {k: v.to(device) for k, v in batch.items()}
             loss = model(batch)
             total_loss.append(loss.item())
         valid_metric = np.mean(total_loss)
-        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate Loss: {valid_metric:.4f}")
+        print(f"Epoch [{epoch + 1}] - Avg Evaluate Loss: {valid_metric:.4f}")
     elif eval_metric == "Recall@5":
         metric_values = []
         value_num = 0
@@ -297,12 +280,14 @@ def eval_epoch(
             batch = {k: v.to(device) for k, v in batch.items()}
             scores = model.inference(batch)
             _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            pred = (indices + 1).cpu().numpy()
+            tgt = batch["next_items"].cpu().numpy()
             metric_values.append(
-                recall_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+                recall_at_k(pred, tgt, 5) * batch["next_items"].shape[0]
             )
             value_num += batch["next_items"].shape[0]
         valid_metric = np.sum(metric_values) / value_num
-        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate Recall@5: {valid_metric:.4f}")
+        print(f"Epoch [{epoch + 1}] - Avg Evaluate Recall@5: {valid_metric:.4f}")
     elif eval_metric == "NDCG@5":
         metric_values = []
         value_num = 0
@@ -310,12 +295,14 @@ def eval_epoch(
             batch = {k: v.to(device) for k, v in batch.items()}
             scores = model.inference(batch)
             _, indices = torch.topk(scores, 5, dim=-1, largest=True, sorted=True)
+            pred = (indices + 1).cpu().numpy()
+            tgt = batch["next_items"].cpu().numpy()
             metric_values.append(
-                ndcg_at_k(indices + 1, batch["next_items"], 5) * batch["next_items"].shape[0]
+                ndcg_at_k(pred, tgt, 5) * batch["next_items"].shape[0]
             )
             value_num += batch["next_items"].shape[0]
         valid_metric = np.sum(metric_values) / value_num
-        logger.log(f"Epoch [{epoch + 1}] - Avg Evaluate NDCG@5: {valid_metric:.4f}")
+        print(f"Epoch [{epoch + 1}] - Avg Evaluate NDCG@5: {valid_metric:.4f}")
     else:
         raise ValueError("Invalid eval metric.")
 
@@ -326,11 +313,10 @@ def test(
     model,
     test_loader,
     device,
-    logger,
     args,
 ):
     model.eval()
-    logger.log("Start Testing")
+    print("Start Testing")
 
     result = {
         metric: {k: [] for k in args.topk}
@@ -341,16 +327,18 @@ def test(
         batch = {k: v.to(device) for k, v in batch.items()}
         scores = model.inference(batch)
         _, indices = torch.topk(scores, max(args.topk), dim=-1, largest=True, sorted=True)
+        pred = (indices + 1).cpu().numpy()
+        tgt = batch["next_items"].cpu().numpy()
         for metric in args.metrics:
             if metric == "Recall":
                 for k in args.topk:
                     result[metric][k].append(
-                        recall_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
+                        recall_at_k(pred, tgt, k) * batch["next_items"].shape[0]
                     )
             elif metric == "NDCG":
                 for k in args.topk:
                     result[metric][k].append(
-                        ndcg_at_k(indices + 1, batch["next_items"], k) * batch["next_items"].shape[0]
+                        ndcg_at_k(pred, tgt, k) * batch["next_items"].shape[0]
                     )
             else:
                 raise ValueError("Invalid metric.")
@@ -359,7 +347,7 @@ def test(
     for metric in args.metrics:
         for k in args.topk:
             result[metric][k] = np.sum(result[metric][k]) / data_num
-            logger.log(f"{metric}@{k}: {result[metric][k]:.4f}")
+            print(f"{metric}@{k}: {result[metric][k]:.4f}")
     
 
     return result
@@ -392,6 +380,9 @@ def run():
     args.num_items = num_items
     args.num_users = num_users
 
+    for k, v in args.__dict__.items():
+        print(f"{k}: {v}")
+        
     # initial model
     model = initial_model(args, interaction_matix, device)
 
@@ -401,80 +392,60 @@ def run():
     # ensure the log, save and result path
     time_now = time.strftime("%Y_%m_%d_%H_%M", time.localtime())
     args.time = time_now
-    log_file_path = os.path.join(args.log_root_path, args.dataset, f"{MODEL_NAME}-{time_now}.log")
     save_dir_path = os.path.join(args.save_root_path, args.dataset)
-    save_file_path = os.path.join(args.save_root_path, args.dataset, f"{MODEL_NAME}-{time_now}.pth")
+    save_file_name = f"{MODEL_NAME}"
+    for param_name in args.params_in_model_save_title:
+        save_file_name += f"-{param_name}_{getattr(args, param_name)}"
+    save_file_path = os.path.join(args.save_root_path, args.dataset, f"{save_file_name}.pth")
     model_result_file_path = os.path.join(args.result_root_path, args.dataset, f"{MODEL_NAME}.result.csv")
-    # all_model_result_path = os.path.join(args.result_root_path, args.dataset, "All.result.csv")
-    ensure_file(log_file_path)
+
+
     ensure_dir(save_dir_path)
     ensure_file(model_result_file_path, args.params_in_model_result)
-    # ensure_file(all_model_result_path, args.params_in_all_model_result)
 
-    # initial logger
-    args_part_msg = {
-        "seed": "# global \n",
-        "data_path": "\n# data \n",
-        "emb_dropout": "\n# model \n",
-        "epochs": "\n# train and eval \n",
-        "metrics": "\n# test \n",
-        "log_root_path": "\n# log, save and result \n"
-    }
-    logger = Logger(log_file_path)
-    logger.args_log(args, args_part_msg)
-
-    # redirect stdout and stderr
-    sys.stdout = logger.log_file
-    sys.stderr = logger.log_file
-    
     # train and eval
     best_valid_metric = math.inf if args.eval_metric == "loss" else math.inf * -1
     best_epoch = -1
     patience = 0
-    try:
-        for epoch in range(args.epochs):
-            train_epoch(epoch, model, train_loader, device, optimizer, scheduler, logger)
-            if epoch % args.eval_step == 0:
-                valid_metric = eval_epoch(epoch, model, valid_loader, args.eval_metric, device, logger)
-                test(model, test_loader, device, logger, args)
-                if args.eval_metric == "loss":
-                    if valid_metric < best_valid_metric:
-                        patience = 0
-                        best_valid_metric = valid_metric
-                        best_epoch = epoch
-                        torch.save(model.state_dict(), save_file_path)
-                        logger.log(f"Save model at epoch [{epoch + 1}]")
-                    else:
-                        patience += 1
-                        logger.log(f"Patience: {patience}/{args.early_stop_step}")
-                        if patience >= args.early_stop_step:
-                            logger.log(f"Early stop at epoch [{epoch + 1}]")
-                            break
-                elif args.eval_metric in ["Recall@5", "NDCG@5"]:
-                    if valid_metric > best_valid_metric:
-                        patience = 0
-                        best_valid_metric = valid_metric
-                        best_epoch = epoch
-                        torch.save(model.state_dict(), save_file_path)
-                        logger.log(f"Save model at epoch [{epoch + 1}]")
-                    else:
-                        patience += 1
-                        logger.log(f"Patience: {patience}/{args.early_stop_step}")
-                        if patience >= args.early_stop_step:
-                            logger.log(f"Early stop at epoch [{epoch + 1}]")
-                            break
+    for epoch in range(args.epochs):
+        train_epoch(epoch, model, train_loader, device, optimizer, scheduler)
+        if epoch % args.eval_step == 0:
+            valid_metric = eval_epoch(epoch, model, valid_loader, args.eval_metric, device)
+            test(model, test_loader, device, args)
+            if args.eval_metric == "loss":
+                if valid_metric < best_valid_metric:
+                    patience = 0
+                    best_valid_metric = valid_metric
+                    best_epoch = epoch
+                    torch.save(model, save_file_path)
+                    print(f"Save model at epoch [{epoch + 1}]")
                 else:
-                    raise ValueError("Invalid eval metric.")
-        logger.log(f"Best epoch: {best_epoch + 1}, Best valid {args.eval_metric}: {best_valid_metric:.4f}")
-        
-        # test
-        model.load_state_dict(torch.load(save_file_path, weights_only=True))
-        test_metric = test(model, test_loader, device, logger, args)
-        save_test_result(test_metric, args, model_result_file_path)
-    except BaseException as e:
-        logger.log(f"Error: {e}")
-        exit(1)
-
+                    patience += 1
+                    print(f"Patience: {patience}/{args.early_stop_step}")
+                    if patience >= args.early_stop_step:
+                        print(f"Early stop at epoch [{epoch + 1}]")
+                        break
+            elif args.eval_metric in ["Recall@5", "NDCG@5"]:
+                if valid_metric > best_valid_metric:
+                    patience = 0
+                    best_valid_metric = valid_metric
+                    best_epoch = epoch
+                    torch.save(model, save_file_path)
+                    print(f"Save model at epoch [{epoch + 1}]")
+                else:
+                    patience += 1
+                    print(f"Patience: {patience}/{args.early_stop_step}")
+                    if patience >= args.early_stop_step:
+                        print(f"Early stop at epoch [{epoch + 1}]")
+                        break
+            else:
+                raise ValueError("Invalid eval metric.")
+    print(f"Best epoch: {best_epoch + 1}, Best valid {args.eval_metric}: {best_valid_metric:.4f}")
+    
+    # test
+    model = torch.load(save_file_path, weights_only=False).to(device)
+    test_metric = test(model, test_loader, device, args)
+    save_test_result(test_metric, args, model_result_file_path)
 
 if __name__ == "__main__":
     run()

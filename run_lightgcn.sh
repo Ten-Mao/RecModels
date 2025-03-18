@@ -1,0 +1,1 @@
+nohup python -u run_lightgcn.py --device cuda:1 --dataset Beauty2014 --d_model 128 --num_layers 2 --lr 1e-3 --wd 1.0 > log/Beauty2014/lightgcn-d_model_128-num_layers_2-lr_1e-3-wd_1.0.log 2>&1 &

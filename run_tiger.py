@@ -600,6 +600,9 @@ def run():
     args.num_items = num_items
     args.num_users = num_users
 
+    for k, v in args.__dict__.items():
+        print(f"{k}: {v}")
+
     # initial model
     rqvae, t54rec = initial_model(args, device)
 

@@ -1,0 +1,1 @@
+nohup python -u run_mf.py --device cuda:0 --dataset Beauty2014 --d_model 128 --lr 1e-3 --wd 1 > log/Beauty2014/mf-d_model_128-lr_1e-3-wd_1.log 2>&1 &

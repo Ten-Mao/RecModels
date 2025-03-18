@@ -29,8 +29,8 @@ class MF(nn.Module):
         self.loss_func = nn.CrossEntropyLoss()
     
     def forward(self, interactions):
-        # users: (batch_size), his_seqs: (batch_size, seq_len), next_items: (batch_size)
-        users = interactions["users"].to(torch.long)
+        # user_seqs: (batch_size), his_seqs: (batch_size, seq_len), next_items: (batch_size)
+        users = interactions["user_seqs"].to(torch.long)
         his_seqs = interactions["his_seqs"].to(torch.long)
         targets = interactions["next_items"].to(torch.long)
 
@@ -45,8 +45,8 @@ class MF(nn.Module):
         return loss
     
     def inference(self, interactions):
-        # users: (batch_size), his_seqs: (batch_size, seq_len)
-        users = interactions["users"].to(torch.long)
+        # user_seqs: (batch_size), his_seqs: (batch_size, seq_len)
+        users = interactions["user_seqs"].to(torch.long)
         his_seqs = interactions["his_seqs"].to(torch.long)
 
         user_emb = self.user_emb(users) # [batch_size, d_model]
@@ -58,8 +58,8 @@ class MF(nn.Module):
         return scores
     
     def predict(self, interactions):
-        # users: (batch_size), his_seqs: (batch_size, seq_len), test_items: (batch_size)
-        users = interactions["users"].to(torch.long)
+        # user_seqs: (batch_size), his_seqs: (batch_size, seq_len), test_items: (batch_size)
+        users = interactions["user_seqs"].to(torch.long)
         his_seqs = interactions["his_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
 

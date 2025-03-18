@@ -1,0 +1,1 @@
+nohup python -u run_bert4rec.py --device cuda:1 --dataset Beauty2014 --d_model 128 --num_layers 2 --lr 5e-4 --wd 5e-1 > log/Beauty2014/bert4rec-d_model_128-num_layers_2-lr_5e-4-wd_5e-1.log 2>&1 &

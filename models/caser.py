@@ -82,7 +82,7 @@ class Caser(nn.Module):
         conv_latent = self.activation_fc(self.fc1(out_conv))
 
         # output
-        final_emb = self.dropout(self.fc2(torch.cat([self.layernorm(conv_latent), user_emb], dim=-1)))
+        final_emb = self.dropout(self.fc2(torch.cat([conv_latent, user_emb], dim=-1)))
         return final_emb
 
     def forward(self, interactions):

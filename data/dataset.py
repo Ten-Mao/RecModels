@@ -1,3 +1,4 @@
+from copy import deepcopy
 import json
 import os
 from typing import Literal
@@ -8,6 +9,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 import numpy as np
 import random
+import scipy.sparse as sp
 
 from tqdm import tqdm
 
@@ -135,6 +137,27 @@ class SeqRecDataset(Dataset):
     def get_user_num(self):
         return len(self.inters)
 
+    def get_adjacency_matrix(self):
+        cache_adj_path = os.path.join(self.cache_dir_path, "sp_adj_mat.npz")
+        if os.path.exists(cache_adj_path):
+            sp_adj_mat = sp.load_npz(cache_adj_path)
+            return sp_adj_mat
+        inter_matrix = np.array([ [int(uid), int(sid), 1] for uid, sid_list in self.inters.items() for sid in sid_list])
+        inter_matrix[:, 1] += self.num_users
+        inter_matrix_t = deepcopy(inter_matrix)
+        inter_matrix_t[:, [0, 1]] = inter_matrix[:, [1, 0]]
+        A = np.concatenate([inter_matrix, inter_matrix_t], axis=0)
+        adf_mat = sp.csr_matrix(
+            (A[:, 2], (A[:, 0], A[:, 1])),
+            shape=(self.num_users + self.num_items, self.num_users + self.num_items)
+        )
+        rowsum = np.array(adf_mat.sum(1))
+        d_inv = np.power(rowsum, -0.5).flatten()
+        d_inv[np.isinf(d_inv)] = 0.0
+        d_mat_inv = sp.diags(d_inv)
+        norm_adj = d_mat_inv.dot(adf_mat).dot(d_mat_inv)
+        sp.save_npz(cache_adj_path, norm_adj)
+        return norm_adj
 
 class IDDataset(Dataset):
     def __init__(self, num_items):

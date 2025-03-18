@@ -98,8 +98,6 @@ def parser_args():
             "train_batch_size",
             "lr",
             "wd",
-
-            "time",
         ]
     )
 
@@ -124,7 +122,6 @@ def initial_dataLoader(args):
             dataset=args.dataset, 
             max_len=args.max_len, 
             mode="train", 
-            mask_ratio=args.mask_ratio, 
             seed=args.seed
         ),
         "valid": SeqRecDataset(
@@ -132,7 +129,6 @@ def initial_dataLoader(args):
             dataset=args.dataset, 
             max_len=args.max_len, 
             mode="valid", 
-            mask_ratio=args.mask_ratio, 
             seed=args.seed
         ),
         "test": SeqRecDataset(
@@ -140,7 +136,6 @@ def initial_dataLoader(args):
             dataset=args.dataset, 
             max_len=args.max_len, 
             mode="test", 
-            mask_ratio=args.mask_ratio, 
             seed=args.seed
         )
     }
@@ -386,6 +381,9 @@ def run():
     args.num_items = num_items
     args.num_users = num_users
 
+    for k, v in args.__dict__.items():
+        print(f"{k}: {v}")
+        
     # initial model
     model = initial_model(args, device)
 
@@ -420,7 +418,7 @@ def run():
                     patience = 0
                     best_valid_metric = valid_metric
                     best_epoch = epoch
-                    torch.save(model.state_dict(), save_file_path)
+                    torch.save(model, save_file_path)
                     print(f"Save model at epoch [{epoch + 1}]")
                 else:
                     patience += 1
@@ -433,7 +431,7 @@ def run():
                     patience = 0
                     best_valid_metric = valid_metric
                     best_epoch = epoch
-                    torch.save(model.state_dict(), save_file_path)
+                    torch.save(model, save_file_path)
                     print(f"Save model at epoch [{epoch + 1}]")
                 else:
                     patience += 1
@@ -446,7 +444,7 @@ def run():
     print(f"Best epoch: {best_epoch + 1}, Best valid {args.eval_metric}: {best_valid_metric:.4f}")
     
     # test
-    model.load_state_dict(torch.load(save_file_path, weights_only=True))
+    model = torch.load(save_file_path, weights_only=False).to(device)
     test_metric = test(model, test_loader, device, args)
     save_test_result(test_metric, args, model_result_file_path)
 

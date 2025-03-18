@@ -57,7 +57,7 @@ class Bert4Rec(nn.Module):
 
         for _ in range(num_layers):
             self.attn_norm.append(LayerNorm(d_model, eps=eps))
-            self.attn.append(MultiHeadAttention(d_model, n_heads, attn_dropout, causal=False, q_mask=True))
+            self.attn.append(MultiHeadAttention(d_model, n_heads, attn_dropout, causal=False, q_mask=False))
             self.ffn_norm.append(LayerNorm(d_model, eps=eps))
             self.ffn.append(FeedForward(d_model, inner_dim, ffn_dropout, ffn_activation))
 
@@ -69,7 +69,7 @@ class Bert4Rec(nn.Module):
         self.loss_func = nn.CrossEntropyLoss()
         
     def encode_seqs(self, his_seqs):
-        key_padding_mask = query_padding_mask = (his_seqs != self.pad_idx)
+        key_padding_mask = (his_seqs != self.pad_idx)
 
         # Embedding Layer
         item_emb = self.item_emb(his_seqs)
@@ -89,7 +89,7 @@ class Bert4Rec(nn.Module):
 
         for i in range(self.num_layers):
             q, k, v = self.attn_norm[i](x), x, x
-            x = self.attn[i](q, k, v, key_padding_mask=key_padding_mask, query_padding_mask=query_padding_mask)
+            x = self.attn[i](q, k, v, key_padding_mask=key_padding_mask)
 
             x = self.ffn_norm[i](x)
             x = self.ffn[i](x)
@@ -101,27 +101,27 @@ class Bert4Rec(nn.Module):
 
         return x   
     
-    def extract(self, his_emb, target_indices):
-        assert his_emb.shape[0] == target_indices.shape[0]
-        res = []
-        for i in range(his_emb.shape[0]):
-            res.append(his_emb[i, target_indices[i], :])
-        return torch.stack(res, dim=0)
+    # def extract(self, his_emb, target_indices):
+    #     assert his_emb.shape[0] == target_indices.shape[0]
+    #     res = []
+    #     for i in range(his_emb.shape[0]):
+    #         res.append(his_emb[i, target_indices[i], :])
+    #     return torch.stack(res, dim=0)
     
-    def inject(self, his_seqs):
-        tgt_pad = torch.full((his_seqs.shape[0], 1), self.pad_idx, dtype=torch.long, device=his_seqs.device)
-        x_pad = torch.cat([his_seqs, tgt_pad], dim=-1)
-        target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
-        x_pad[torch.arange(his_seqs.shape[0]), target_indices] = self.mask_idx 
-        return x_pad, target_indices
+    # def inject(self, his_seqs):
+    #     tgt_pad = torch.full((his_seqs.shape[0], 1), self.pad_idx, dtype=torch.long, device=his_seqs.device)
+    #     x_pad = torch.cat([his_seqs, tgt_pad], dim=-1)
+    #     target_indices = (his_seqs != self.pad_idx).sum(dim=-1)
+    #     x_pad[torch.arange(his_seqs.shape[0]), target_indices] = self.mask_idx 
+    #     return x_pad, target_indices
 
     def forward(self, interactions):
         # his_seqs: [batch_size, seq_len], next_items: [batch_size]
         his_seqs = interactions["his_seqs"].to(torch.long)
         next_items = interactions["next_items"].to(torch.long)
-        his_seqs, target_indices = self.inject(his_seqs)
+        # his_seqs, target_indices = self.inject(his_seqs)
         his_emb = self.encode_seqs(his_seqs)
-        target_emb = self.extract(his_emb, target_indices)
+        target_emb = his_emb[:, -1, :]
 
         scores = target_emb @ self.item_emb.weight[1:-1].t()
         loss = self.loss_func(scores, next_items - 1)
@@ -130,9 +130,10 @@ class Bert4Rec(nn.Module):
     def inference(self, interactions):
         # his_seqs: [batch_size, seq_len]
         his_seqs = interactions["his_seqs"].to(torch.long)
-        his_seqs, target_indices = self.inject(his_seqs)
+        # his_seqs, target_indices = self.inject(his_seqs)
+        target_indices = (his_seqs != self.pad_idx).sum(dim=-1) - 1
         his_emb = self.encode_seqs(his_seqs)
-        target_emb = self.extract(his_emb, target_indices)
+        target_emb = his_emb[:, -1, :]
         scores = target_emb @ self.item_emb.weight[1:-1].t() # [batch_size, n_items]
         return scores
     
@@ -141,9 +142,9 @@ class Bert4Rec(nn.Module):
         his_seqs = interactions["his_seqs"].to(torch.long)
         test_items = interactions["test_items"].to(torch.long)
 
-        his_seqs, target_indices = self.inject(his_seqs)
+        # his_seqs, target_indices = self.inject(his_seqs)
         his_emb = self.encode_seqs(his_seqs)
-        target_emb = self.extract(his_emb, target_indices)
+        target_emb = his_emb[:, -1, :]
         test_emb = self.item_emb(test_items)
         scores = torch.sum(target_emb * test_emb, dim=-1)
         return scores

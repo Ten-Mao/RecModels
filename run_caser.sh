@@ -1,0 +1,1 @@
+nohup python -u run_caser.py --device cuda:0 --dataset Beauty2014 --d_model 128 --n_horizontal_conv_per_h 16 --n_vertical_conv 4 --lr 1e-3 --wd 1 > log/Beauty2014/caser-d_model_128-n_horizontal_conv_per_h_16-n_vertical_conv_4-lr_1e-3-wd_1.log 2>&1 &
