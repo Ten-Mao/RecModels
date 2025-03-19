@@ -363,7 +363,7 @@ class RQVAE(nn.Module):
         kmeans_cluster: int=10,
 
         mu: float=0.25,
-        alpha: float=0.001,
+        alpha: float=0.02,
         beta: float=0.0001,
     ):
         
@@ -393,9 +393,9 @@ class RQVAE(nn.Module):
         self.item_emb.weight.requires_grad = False
 
         if self.cf_loss_open:
-            self.cf_emb_data = np.load(cf_emb_path)
-            self.cf_emb = nn.Embedding(self.cf_emb_data.shape[0], self.in_dims[0], padding_idx=self.padding_idx)
-            self.cf_emb.weight.data.copy_(torch.tensor(self.cf_emb_data, dtype=torch.float32))
+            self.cf_emb_data = torch.load(cf_emb_path)
+            self.cf_emb = nn.Embedding(self.cf_emb_data.shape[0], self.in_dims[-1], padding_idx=self.padding_idx)
+            self.cf_emb.weight.data.copy_(self.cf_emb_data.clone().detach().to(torch.float32))
             self.cf_emb.weight.requires_grad = False
 
 
@@ -527,9 +527,10 @@ class RQVAE(nn.Module):
 
         if self.cf_loss_open and self.alpha > 0:
             x_cf_emb = self.cf_emb(x_reshape) # [N, in_dims[-1]]
-            sim = quant @ x_cf_emb[1:].t() # [N, N]
-            label = (x_reshape-1).detach()
-            cf_loss = F.cross_entropy(sim, label, ignore_index=-1) # [N]
+            sim = quant @ x_cf_emb.t() # [N, N]
+            label = torch.arange(x_reshape.shape[0], device=x_reshape.device)
+            cf_loss = F.cross_entropy(sim, label, reduction="none")
+            cf_loss = torch.sum(cf_loss * mask) / torch.sum(mask)
             loss += self.alpha * cf_loss
         else:
             cf_loss = torch.tensor(0.0)

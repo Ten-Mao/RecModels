@@ -1,0 +1,1 @@
+nohup python -u run_letter.py --device cuda:0 --dataset Beauty2014 --alpha 2e-2 --beta 1e-4 --rqvae_lr 1e-3 --rqvae_wd 1e-4 --rqvae_select_position best --t54rec_lr 5e-4 --t54rec_train_batch_size 256 --sinkhorn_open > log/Beauty2014/letter-alpha_2e-2-beta_1e-4-rqvae_lr_1e-3-rqvae_wd_1e-4-rqvae_select_position_best-t54rec_lr_5e-4-t54rec_train_batch_size_256.log 2>&1 &

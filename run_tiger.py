@@ -78,7 +78,6 @@ def parser_args():
     parser.add_argument("--topk", nargs="+", type=int, default=[5, 10])
 
     # log, save and result
-    parser.add_argument("--log_root_path", type=str, default="./log/")
     parser.add_argument("--save_root_path", type=str, default="./save/")
     parser.add_argument("--result_root_path", type=str, default="./result/")
     parser.add_argument(
@@ -193,7 +192,7 @@ def initial_dataLoader(args):
     return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
-    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-{args.rqvae_select_position}.pth"
+    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-{args.rqvae_select_position}.pth"
 
     if not os.path.exists(rqvae_state_path):
         rqvae = RQVAE(
@@ -210,8 +209,7 @@ def initial_model(args, device):
         fit_rqvae(args, rqvae, device)
 
     assert os.path.exists(rqvae_state_path)
-    rqvae = torch.load(rqvae_state_path, weights_only=False)
-    rqvae = rqvae.to(device)
+    rqvae = torch.load(rqvae_state_path, weights_only=False).to(device)
 
     # freeze rqvae
     for param in rqvae.parameters():
@@ -326,16 +324,16 @@ def fit_rqvae(
             print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {1 - unique_ratio}")
             if unique_ratio > max_unique_ratio:
                 max_unique_ratio = unique_ratio
-                torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+                torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
     
     # save last
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
+    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
 
     # save best
-    rqvae = torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth", weights_only=False)
+    rqvae = torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth", weights_only=False).to(device)
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
 
 def prepare_input(
     his_seqs,
@@ -650,7 +648,7 @@ def run():
                     patience = 0
                     best_valid_metric = valid_metric
                     best_epoch = epoch
-                    torch.save(t54rec.state_dict(), save_file_path)
+                    torch.save(t54rec, save_file_path)
                     print(f"Save model at epoch [{epoch + 1}]")
                 else:
                     patience += 1
@@ -663,7 +661,7 @@ def run():
             
     print(f"Best epoch: {best_epoch + 1}, Best valid {args.t54rec_eval_metric}: {best_valid_metric:.4f}")
 
-    t54rec.load_state_dict(torch.load(save_file_path, weights_only=True))
+    t54rec = torch.load(save_file_path, weights_only=False).to(device)
     test_metric = test(t54rec, test_loader, indice_matrix, device, args)
     save_test_result(test_metric, args, model_result_file_path)
 

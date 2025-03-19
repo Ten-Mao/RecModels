@@ -6,5 +6,6 @@
 *.pth
 *.npy
 *.npz
+*.pt
 
 # !result/**/*

@@ -1,1 +1,1 @@
-nohup python -u run_sasrec.py --device cuda:0 --dataset Beauty2014 --d_model 128 --lr 5e-4 --wd 5e-1 --num_layers 2 > log/Beauty2014/sasrec-d_model_128-lr_5e-4-wd_5e-1-num_layers_2.log 2>&1 &
+nohup python -u run_sasrec.py --device cuda:0 --dataset Beauty2014 --d_model 32 --lr 1e-2 --wd 1e-2 --num_layers 2 > log/Beauty2014/sasrec-d_model_32-lr_1e-2-wd_1e-2-num_layers_2.log 2>&1 &
