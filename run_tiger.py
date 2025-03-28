@@ -31,7 +31,7 @@ def parser_args():
 
     # data
     parser.add_argument("--data_path", type=str, default="./data/")
-    parser.add_argument("--dataset", choices=["Beauty2014", "Yelp"], default="Beauty2014")
+    parser.add_argument("--dataset", choices=["Beauty2014", "Yelp", "Beauty"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # rqvae
@@ -42,6 +42,7 @@ def parser_args():
     parser.add_argument("--sinkhorn_open", action="store_true")
     parser.add_argument("--sinkhorn_epsilons", type=list, default=[0.0, 0.0, 0.0, 0.003])
     parser.add_argument("--sinkhorn_iter", type=int, default=50)
+    parser.add_argument("--kmeans_init_iter", type=int, default=10)
     parser.add_argument("--mu", type=float, default=0.25)
 
     # rqvae train and eval
@@ -88,6 +89,7 @@ def parser_args():
             
             "rqvae_lr",
             "rqvae_wd",
+            "kmeans_init_iter",
 
             "rqvae_select_position",
             "t54rec_lr",
@@ -113,6 +115,7 @@ def parser_args():
         default=[      
             "rqvae_lr",
             "rqvae_wd",
+            "kmeans_init_iter",
 
             "rqvae_select_position",
             "t54rec_lr",
@@ -132,7 +135,7 @@ def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -192,7 +195,7 @@ def initial_dataLoader(args):
     return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
-    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-{args.rqvae_select_position}.pth"
+    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-{args.rqvae_select_position}.pth"
 
     if not os.path.exists(rqvae_state_path):
         rqvae = RQVAE(
@@ -204,6 +207,7 @@ def initial_model(args, device):
             sinkhorn_open=args.sinkhorn_open,
             sinkhorn_epsilons=args.sinkhorn_epsilons,
             sinkhorn_iter=args.sinkhorn_iter,
+            kmeans_init_iter=args.kmeans_init_iter,
             mu=args.mu
         ).to(device)
         fit_rqvae(args, rqvae, device)
@@ -308,15 +312,15 @@ def fit_rqvae(
         quant_loss_list = []
         for _, batch in enumerate(id_dataloader):
             batch = batch.to(device)
-            _, _, _, loss, recon_loss, quant_loss, _ = rqvae(batch)
+            _, _, _, _, loss, recon_loss, quant_loss, _ = rqvae(batch)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             loss_list.append(loss.item())
             recon_loss_list.append(recon_loss.item())
             quant_loss_list.append(quant_loss.item())
-        
-        print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Loss: {np.mean(loss_list)}, Recon Loss: {np.mean(recon_loss_list)}, Quant Loss: {np.mean(quant_loss_list)}")
+        print(f"Epoch: [{epoch + 1}] loss: {loss.item()} recon_loss: {recon_loss.item()} quant_loss: {quant_loss.item()}")
+        # print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Loss: {np.mean(loss_list)}, Recon Loss: {np.mean(recon_loss_list)}, Quant Loss: {np.mean(quant_loss_list)}")
 
         if (epoch + 1) % args.rqvae_eval_step == 0:
             print(f"Evaluating Epoch: [{epoch + 1}/{args.rqvae_epochs}]")
@@ -324,16 +328,16 @@ def fit_rqvae(
             print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {1 - unique_ratio}")
             if unique_ratio > max_unique_ratio:
                 max_unique_ratio = unique_ratio
-                torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+                torch.save(rqvae, f"{save_dir_path}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth")
     
     # save last
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
+    torch.save(rqvae, f"{save_dir_path}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-last.pth")
 
     # save best
-    rqvae = torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth", weights_only=False).to(device)
+    rqvae = torch.load(f"{save_dir_path}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth", weights_only=False).to(device)
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+    torch.save(rqvae, f"{save_dir_path}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth")
 
 def prepare_input(
     his_seqs,
@@ -598,11 +602,14 @@ def run():
     args.num_items = num_items
     args.num_users = num_users
 
-    for k, v in args.__dict__.items():
-        print(f"{k}: {v}")
+
 
     # initial model
     rqvae, t54rec = initial_model(args, device)
+
+
+    for k, v in args.__dict__.items():
+        print(f"{k}: {v}")
 
     rqvae_indices = rqvae.get_all_indices()
     indice_matrix = nn.Embedding(num_items + 1, len(args.codebook_sizes)).to(device)

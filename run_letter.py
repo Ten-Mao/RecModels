@@ -42,6 +42,7 @@ def parser_args():
     parser.add_argument("--sinkhorn_open", action="store_true")
     parser.add_argument("--sinkhorn_epsilons", type=list, default=[0.0, 0.0, 0.0, 0.003])
     parser.add_argument("--sinkhorn_iter", type=int, default=50)
+    parser.add_argument("--kmeans_init_iter", type=int, default=10)
     parser.add_argument("--kmeans_cluster", type=int, default=10)
     parser.add_argument("--mu", type=float, default=0.25)
     parser.add_argument("--alpha", type=float, default=0.02)
@@ -93,6 +94,7 @@ def parser_args():
             "beta",
             "rqvae_lr",
             "rqvae_wd",
+            "kmeans_init_iter",
 
             "rqvae_select_position",
             "t54rec_lr",
@@ -120,6 +122,7 @@ def parser_args():
             "beta",
             "rqvae_lr",
             "rqvae_wd",
+            "kmeans_init_iter",
 
             "rqvae_select_position",
             "t54rec_lr",
@@ -199,7 +202,7 @@ def initial_dataLoader(args):
     return dataloaders["train"], dataloaders["valid"], dataloaders["test"], datasets["train"].num_items, datasets["train"].num_users
 
 def initial_model(args, device):
-    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-{args.rqvae_select_position}.pth"
+    rqvae_state_path = f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-{args.rqvae_select_position}.pth"
 
     if not os.path.exists(rqvae_state_path):
         rqvae = RQVAE(
@@ -214,6 +217,7 @@ def initial_model(args, device):
             sinkhorn_iter=args.sinkhorn_iter,
             cf_loss_open=True,
             diversity_loss_open=True,
+            kmeans_init_iter=args.kmeans_init_iter,
             kmeans_cluster=args.kmeans_cluster,
             mu=args.mu,
             alpha=args.alpha,
@@ -340,16 +344,16 @@ def fit_rqvae(
             print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {1 - unique_ratio}")
             if unique_ratio > max_unique_ratio:
                 max_unique_ratio = unique_ratio
-                torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+                torch.save(rqvae, f"{save_dir_path}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth")
     
     # save last
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-last.pth")
+    torch.save(rqvae, f"{save_dir_path}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-last.pth")
 
     # save best
-    rqvae = torch.load(f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth", weights_only=False).to(device)
+    rqvae = torch.load(f"{save_dir_path}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth", weights_only=False).to(device)
     rqvae.set_all_indices()
-    torch.save(rqvae, f"{args.save_root_path}/{args.dataset}/{MODEL_NAME}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-best.pth")
+    torch.save(rqvae, f"{save_dir_path}/rqvae-letter-alpha_{args.alpha}-beta_{args.beta}-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth")
 
 def prepare_input(
     his_seqs,

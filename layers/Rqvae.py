@@ -21,6 +21,7 @@ class VectorQuantier(nn.Module):
         sinkhorn_iter: int=50,
 
         diversity_loss_open: bool=False,
+        kmeans_init_iter: int=10,
         kmeans_cluster: int=10,
 
         mu: float=0.25,
@@ -39,6 +40,7 @@ class VectorQuantier(nn.Module):
         self.sinkhorn_iter = sinkhorn_iter
 
         self.diversity_loss_open = diversity_loss_open
+        self.kmeans_init_iter = kmeans_init_iter
         self.kmeans_cluster = kmeans_cluster
 
 
@@ -54,7 +56,7 @@ class VectorQuantier(nn.Module):
                 n_clusters=self.codebook_size,
                 size_min=size_min, 
                 size_max=size_min * 4, 
-                max_iter=100, 
+                max_iter=self.kmeans_init_iter, 
                 n_init=10,
                 n_jobs=10, 
                 verbose=False
@@ -66,7 +68,7 @@ class VectorQuantier(nn.Module):
                 n_clusters=self.codebook_size,
                 size_min=size_min, 
                 size_max=size_min * 4, 
-                max_iter=100, 
+                max_iter=self.kmeans_init_iter, 
                 n_init=10,
                 n_jobs=10, 
                 verbose=False
@@ -74,8 +76,8 @@ class VectorQuantier(nn.Module):
             clf.fit(x_)
         self.codebook.weight.data.copy_(torch.tensor(clf.cluster_centers_, dtype=torch.float32))
 
-        quant, _, _ = self.inference(x)
-        return quant
+        quant_hard, _, _, _ = self.inference(x)
+        return quant_hard
 
     def update_labels(self):
         size_min = min(self.codebook_size // (self.kmeans_cluster * 2), 10)
@@ -148,10 +150,11 @@ class VectorQuantier(nn.Module):
             indices = torch.argmax(-d2term, dim=-1)
         
         quant_hard = self.codebook(indices) # [N, codebook_dim]
-        quant = (quant_hard - x).detach() + x # [N, codebook_dim]
 
         codebook_loss = torch.mean((quant_hard - x.detach())**2, dim=-1) # [N]
         commitment_loss = torch.mean((quant_hard.detach() - x)**2, dim=-1) # [N]
+        # 这里 quant的分离操作必须放到两个loss的计算之后否则会出现异常，原理暂不明晰
+        quant_soft = (quant_hard - x).detach() + x # [N, codebook_dim]
         loss = codebook_loss + self.mu*commitment_loss # [N]
 
         if self.diversity_loss_open and self.beta > 0:
@@ -190,7 +193,7 @@ class VectorQuantier(nn.Module):
 
             loss += self.beta * diversity_loss # [N]
 
-        return quant, indices, probs, loss
+        return quant_hard, quant_soft, indices, probs, loss
 
     @torch.no_grad()
     def inference(self, x):
@@ -234,9 +237,9 @@ class VectorQuantier(nn.Module):
             indices = torch.argmax(-d2term, dim=-1)
 
         quant_hard = self.codebook(indices) # [N, codebook_dim]
-        quant = (quant_hard - x).detach() + x # [N, codebook_dim]
+        quant_soft = (quant_hard - x).detach() + x # [N, codebook_dim]
 
-        return quant, indices, probs
+        return quant_hard, quant_soft, indices, probs
             
 
 
@@ -252,6 +255,7 @@ class ResidualVectorQuantier(nn.Module):
         sinkhorn_iter: int=50,
 
         diversity_loss_open: bool=False,
+        kmeans_init_iter: int=10,
         kmeans_cluster: int=10,
 
         mu: float=0.25,
@@ -267,6 +271,7 @@ class ResidualVectorQuantier(nn.Module):
         self.sinkhorn_iter = sinkhorn_iter
 
         self.diversity_loss_open = diversity_loss_open
+        self.kmeans_init_iter = kmeans_init_iter
         self.kmeans_cluster = kmeans_cluster
 
         self.mu = mu
@@ -280,6 +285,7 @@ class ResidualVectorQuantier(nn.Module):
                 sinkhorn_epsilon=sinkhorn_epsilon_i,
                 sinkhorn_iter=self.sinkhorn_iter,
                 diversity_loss_open=self.diversity_loss_open,
+                kmeans_init_iter=self.kmeans_init_iter,
                 kmeans_cluster=self.kmeans_cluster,
                 mu=self.mu,
                 beta=self.beta
@@ -303,42 +309,46 @@ class ResidualVectorQuantier(nn.Module):
     def forward(self, x):
         # x [N, codebook_dim]
         residual = x
-        quant = 0
+        quant_hard = 0
+        quant_soft = 0
         indices_list = []
         probs_list = []
         loss_list = []
         for codebook_i in self.codebooks:
-            quant_i, indices_i, probs_i, loss_i = codebook_i(residual)
+            quant_hard_i, quant_soft_i, indices_i, probs_i, loss_i = codebook_i(residual)
             indices_list.append(indices_i)
             probs_list.append(probs_i)
             loss_list.append(loss_i)
-            residual = residual - quant_i
-            quant += quant_i
+            residual = residual - quant_soft_i
+            quant_hard += quant_hard_i
+            quant_soft += quant_soft_i
         
         indices = torch.stack(indices_list, dim=-1) # [N, codebook_num]
         probs = torch.stack(probs_list, dim=-1) # [N, codebook_size, codebook_num]
         loss = torch.stack(loss_list, dim=-1).mean(dim=-1) # [N]
 
-        return quant, indices, probs, loss
+        return quant_hard, quant_soft, indices, probs, loss
 
     @torch.no_grad()
     def inference(self, x):
         # x [N, codebook_dim]
         residual = x
-        quant = 0
+        quant_hard = 0
+        quant_soft = 0
         indices_list = []
         probs_list = []
         for codebook_i in self.codebooks:
-            quant_i, indices_i, probs_i = codebook_i.inference(residual)
+            quant_hard_i, quant_soft_i, indices_i, probs_i = codebook_i.inference(residual)
             indices_list.append(indices_i)
             probs_list.append(probs_i)
-            residual = residual - quant_i
-            quant += quant_i
+            residual = residual - quant_soft_i
+            quant_hard += quant_hard_i
+            quant_soft += quant_soft_i
         
         indices = torch.stack(indices_list, dim=-1) # [N, codebook_num]
         probs = torch.stack(probs_list, dim=-1) # [N, codebook_size, codebook_num]
 
-        return quant, indices, probs
+        return quant_hard, quant_soft, indices, probs
 
 
 
@@ -360,6 +370,7 @@ class RQVAE(nn.Module):
 
         cf_loss_open: bool=False,
         diversity_loss_open: bool=False,
+        kmeans_init_iter: int=10,
         kmeans_cluster: int=10,
 
         mu: float=0.25,
@@ -379,11 +390,28 @@ class RQVAE(nn.Module):
 
         self.cf_loss_open = cf_loss_open
         self.diversity_loss_open = diversity_loss_open
+        self.kmeans_init_iter = kmeans_init_iter
         self.kmeans_cluster = kmeans_cluster
 
         self.mu = mu
         self.alpha = alpha
         self.beta = beta
+
+        self.encoder = MLPLayers(in_dims, activation_fn="relu", last_activation=False, dropout=dropout)
+        self.rq = ResidualVectorQuantier(
+            codebook_sizes=self.codebook_sizes,
+            codebook_dim=self.codebook_dim,
+            sinkhorn_open=self.sinkhorn_open,
+            sinkhorn_epsilons=self.sinkhorn_epsilons,
+            sinkhorn_iter=self.sinkhorn_iter,
+            diversity_loss_open=self.diversity_loss_open,
+            kmeans_init_iter=self.kmeans_init_iter,
+            kmeans_cluster=self.kmeans_cluster,
+            mu=self.mu,
+            beta=self.beta
+        )
+        self.decoder = MLPLayers(in_dims[::-1], activation_fn="relu", last_activation=False, dropout=dropout)
+
 
         self.padding_idx = 0
         self.item_emb_data = np.load(item_emb_path)
@@ -399,20 +427,6 @@ class RQVAE(nn.Module):
             self.cf_emb.weight.requires_grad = False
 
 
-        self.encoder = MLPLayers(in_dims, activation_fn="relu", last_activation=False, dropout=dropout)
-        self.rq = ResidualVectorQuantier(
-            codebook_sizes=self.codebook_sizes,
-            codebook_dim=self.codebook_dim,
-            sinkhorn_open=self.sinkhorn_open,
-            sinkhorn_epsilons=self.sinkhorn_epsilons,
-            sinkhorn_iter=self.sinkhorn_iter,
-            diversity_loss_open=self.diversity_loss_open,
-            kmeans_cluster=self.kmeans_cluster,
-            mu=self.mu,
-            beta=self.beta
-        )
-        self.decoder = MLPLayers(in_dims[::-1], activation_fn="relu", last_activation=False, dropout=dropout)
-
         self.item_indices = None
 
     @torch.no_grad()
@@ -426,8 +440,8 @@ class RQVAE(nn.Module):
 
     @torch.no_grad()
     def compute_unique_key_ratio(self):
-        x_in = self.encoder(self.item_emb.weight[1:]) # [N, in_dims[-1]]
-        _, item_indices, _ = self.rq.inference(x_in)
+        x_in = self.encoder(self.item_emb.weight) # [N, in_dims[-1]]
+        _, _, item_indices, _ = self.rq.inference(x_in)
         item_indices = item_indices.cpu().numpy()
         inverse_map = defaultdict(list)
         for i, indices in enumerate(item_indices):
@@ -461,8 +475,8 @@ class RQVAE(nn.Module):
 
 
 
-        x_in = self.encoder(self.item_emb.weight[1:])
-        _, item_indices, _ = self.rq.inference(x_in)
+        x_in = self.encoder(self.item_emb.weight)
+        _, _, item_indices, _ = self.rq.inference(x_in)
         item_indices = item_indices.cpu().numpy() # [N, codebook_num]
         prefix = ["<a_{}>","<b_{}>","<c_{}>","<d_{}>","<e_{}>","<f_{}>"]
         item_indices_str = []
@@ -481,7 +495,7 @@ class RQVAE(nn.Module):
         while iter_num > 0 and len(item_indices) != len(set(item_indices_str)):
             collision_item_groups = get_collision_item(item_indices_str)
             for collision_group in collision_item_groups:
-                _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))
+                _, _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))
                 new_indices = new_indices.cpu().numpy()
                 for i, new_index in enumerate(new_indices):
                     item_indices_str[collision_group[i] - 1] = ",".join([prefix[j].format(new_index[j]) for j in range(len(new_index))])
@@ -494,7 +508,6 @@ class RQVAE(nn.Module):
             vq.sinkhorn_epsilon = sinkhorn_epsilons[i]
         
         self.item_indices = torch.tensor(item_indices, dtype=torch.long, device=x_in.device)
-        self.item_indices = torch.cat([torch.zeros((1, self.item_indices.shape[1]), dtype=torch.long, device=self.item_indices.device), self.item_indices], dim=0) # [N+1, codebook_num]
         
         print(
             f"Unique key number: {len(set(item_indices_str))}, ratio: {len(set(item_indices_str))/(len(item_indices) - 1)}."
@@ -514,8 +527,8 @@ class RQVAE(nn.Module):
 
         x_emb = self.item_emb(x_reshape) # [N, in_dims[0]]
         x_in = self.encoder(x_emb) # [N, in_dims[-1]]
-        quant, indices, probs, quant_loss = self.rq(x_in)
-        x_out = self.decoder(quant) # [N, in_dims[0]]
+        quant_hard, quant_soft, indices, probs, quant_loss = self.rq(x_in)
+        x_out = self.decoder(quant_soft) # [N, in_dims[0]]
 
         recon_loss = torch.mean((x_out - x_emb)**2, dim=-1) * mask
         recon_loss = torch.sum(recon_loss) / torch.sum(mask)
@@ -527,7 +540,7 @@ class RQVAE(nn.Module):
 
         if self.cf_loss_open and self.alpha > 0:
             x_cf_emb = self.cf_emb(x_reshape) # [N, in_dims[-1]]
-            sim = quant @ x_cf_emb.t() # [N, N]
+            sim = quant_soft @ x_cf_emb.t() # [N, N]
             label = torch.arange(x_reshape.shape[0], device=x_reshape.device)
             cf_loss = F.cross_entropy(sim, label, reduction="none")
             cf_loss = torch.sum(cf_loss * mask) / torch.sum(mask)
@@ -536,10 +549,11 @@ class RQVAE(nn.Module):
             cf_loss = torch.tensor(0.0)
             
         if shape_len == 2:
-            quant = quant.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
+            quant_hard = quant_hard.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
+            quant_soft = quant_soft.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
             indices = indices.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_num]
             probs = probs.reshape(bsz, seq_len, probs.shape[-2], probs.shape[-1]) # [bsz, seq_len, codebook_size, codebook_num]
-        return quant, indices, probs, loss, recon_loss, quant_loss, cf_loss
+        return quant_hard, quant_soft, indices, probs, loss, recon_loss, quant_loss, cf_loss
     
     @torch.no_grad()
     def inference(self, x):
@@ -552,11 +566,12 @@ class RQVAE(nn.Module):
 
         x_emb = self.item_emb(x) # [N, in_dims[0]]
         x_in = self.encoder(x_emb) # [N, in_dims[-1]]
-        quant, indices, probs = self.rq.inference(x_in)
+        quant_hard, quant_soft, indices, probs = self.rq.inference(x_in)
         
         if shape_len == 2:
-            quant = quant.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
+            quant_hard = quant_hard.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
+            quant_soft = quant_soft.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_dim]
             indices = indices.reshape(bsz, seq_len, -1) # [bsz, seq_len, codebook_num]
             probs = probs.reshape(bsz, seq_len, probs.shape[-2], probs.shape[-1]) # [bsz, seq_len, codebook_size, codebook_num]
 
-        return quant, indices, probs
+        return quant_hard, quant_soft, indices, probs
