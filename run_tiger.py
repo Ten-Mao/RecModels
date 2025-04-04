@@ -31,7 +31,7 @@ def parser_args():
 
     # data
     parser.add_argument("--data_path", type=str, default="./data/")
-    parser.add_argument("--dataset", choices=["Beauty2014", "Yelp", "Beauty"], default="Beauty2014")
+    parser.add_argument("--dataset", choices=["Beauty2014", "Yelp", "Beauty", "Arts", "Instruments"], default="Beauty2014")
     parser.add_argument("--num_workers", type=int, default=4)
 
     # rqvae
@@ -305,7 +305,7 @@ def fit_rqvae(
 
     rqvae.train()
 
-    max_unique_ratio = 0
+    min_collision_ratio = 1.0
     for epoch in range(args.rqvae_epochs):
         loss_list = []
         recon_loss_list = []
@@ -324,10 +324,10 @@ def fit_rqvae(
 
         if (epoch + 1) % args.rqvae_eval_step == 0:
             print(f"Evaluating Epoch: [{epoch + 1}/{args.rqvae_epochs}]")
-            unique_ratio = rqvae.compute_unique_key_ratio()
-            print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {1 - unique_ratio}")
-            if unique_ratio > max_unique_ratio:
-                max_unique_ratio = unique_ratio
+            collision_ratio = rqvae.compute_collision_ratio()
+            print(f"Epoch: [{epoch + 1}/{args.rqvae_epochs}], Collision Rate: {collision_ratio}")
+            if collision_ratio <= min_collision_ratio:
+                min_collision_ratio = collision_ratio
                 torch.save(rqvae, f"{save_dir_path}/rqvae-tiger-lr_{args.rqvae_lr}-wd_{args.rqvae_wd}-kmi_{args.kmeans_init_iter}-best.pth")
     
     # save last

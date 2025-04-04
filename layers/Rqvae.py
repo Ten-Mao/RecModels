@@ -47,7 +47,7 @@ class VectorQuantier(nn.Module):
         self.mu = mu
         self.beta = beta
     
-    def kmeans_init(self, x):
+    def kmeans_init(self, x, sample_indices=False):
         # x: [N, codebook_dim]
         size_min = min(x.shape[0] // (self.codebook_size * 2), 50)
         x_ = x.detach().cpu().numpy()
@@ -76,7 +76,7 @@ class VectorQuantier(nn.Module):
             clf.fit(x_)
         self.codebook.weight.data.copy_(torch.tensor(clf.cluster_centers_, dtype=torch.float32))
 
-        quant_hard, _, _, _ = self.inference(x)
+        quant_hard, _, _, _ = self.inference(x, sample_indices)
         return quant_hard
 
     def update_labels(self):
@@ -107,7 +107,7 @@ class VectorQuantier(nn.Module):
             clf.fit(x_)
         self.labels = torch.tensor(clf.labels_, dtype=torch.long).tolist()
 
-    def forward(self, x):
+    def forward(self, x, sample_indices=False):
         # x [N, codebook_dim]
         d2term = (
             torch.sum(x**2, dim=-1, keepdim=True)
@@ -115,46 +115,48 @@ class VectorQuantier(nn.Module):
             - 2 * torch.matmul(x, self.codebook.weight.t())
         ) # [N, codebook_size]
 
-        if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
-            # Sinkhorn normalization -> [-1, 1]
-            max_d = d2term.max()
-            min_d = d2term.min()
-            mid_d = (max_d + min_d) / 2
-            d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-8)
-            d2term_normed = d2term_normed.double()
+        if sample_indices:
+            if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
+                # Sinkhorn normalization -> [-1, 1]
+                max_d = d2term.max()
+                min_d = d2term.min()
+                mid_d = (max_d + min_d) / 2
+                d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-5)
+                d2term_normed = d2term_normed.double()
 
-            # Sinkhorn iteration 概率均衡化
-            d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
-            B = d2term_standard.shape[0]
-            K = d2term_standard.shape[1] 
-            d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
+                # Sinkhorn iteration 概率均衡化
+                d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
+                B = d2term_standard.shape[0]
+                K = d2term_standard.shape[1] 
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
 
-            for _ in range(self.sinkhorn_iter):
-                # row normalization
-                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True) + 1e-8)
-                d2term_standard /= B
+                for _ in range(self.sinkhorn_iter):
+                    # row normalization
+                    d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True))
+                    d2term_standard /= B
 
-                # column normalization
-                d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True) + 1e-8)
-                d2term_standard /= K
+                    # column normalization
+                    d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True))
+                    d2term_standard /= K
 
 
-            
-            d2term_standard *= B
+                
+                d2term_standard *= B
 
-            probs = d2term_standard # [batch_size, codebook_size]
-            indices = torch.argmax(probs, dim=-1) # [batch_size]
-        
+                probs = d2term_standard # [batch_size, codebook_size]
+                indices = torch.argmax(probs, dim=-1) # [batch_size]
+            else:
+                probs = F.softmax(-d2term, dim=-1)
+                indices = torch.multinomial(probs, 1)
         else:
             probs = F.softmax(-d2term, dim=-1)
-            indices = torch.argmax(-d2term, dim=-1)
-        
+            indices = torch.argmin(d2term, dim=-1)
+
         quant_hard = self.codebook(indices) # [N, codebook_dim]
 
         codebook_loss = torch.mean((quant_hard - x.detach())**2, dim=-1) # [N]
         commitment_loss = torch.mean((quant_hard.detach() - x)**2, dim=-1) # [N]
-        # 这里 quant的分离操作必须放到两个loss的计算之后否则会出现异常，原理暂不明晰
-        quant_soft = (quant_hard - x).detach() + x # [N, codebook_dim]
+
         loss = codebook_loss + self.mu*commitment_loss # [N]
 
         if self.diversity_loss_open and self.beta > 0:
@@ -192,11 +194,14 @@ class VectorQuantier(nn.Module):
             diversity_loss = F.cross_entropy(sim, pos, reduction="none") # [N]
 
             loss += self.beta * diversity_loss # [N]
+        
+        # 这里 quant的分离操作必须放到loss的计算之后否则会出现异常，原理暂不明晰，暂定为动态计算图问题
+        quant_soft = (quant_hard - x).detach() + x # [N, codebook_dim]
 
         return quant_hard, quant_soft, indices, probs, loss
 
     @torch.no_grad()
-    def inference(self, x):
+    def inference(self, x, sample_indices=False):
         # x [N, codebook_dim]
         d2term = (
             torch.sum(x**2, dim=-1, keepdim=True)
@@ -204,37 +209,40 @@ class VectorQuantier(nn.Module):
             - 2 * torch.matmul(x, self.codebook.weight.t())
         )
 
-        if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
-            # Sinkhorn normalization -> [-1, 1]
-            max_d = d2term.max()
-            min_d = d2term.min()
-            mid_d = (max_d + min_d) / 2
-            d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-8)
-            d2term_normed = d2term_normed.double()
+        if sample_indices:
+            if self.sinkhorn_open and self.sinkhorn_epsilon > 0:
+                # Sinkhorn normalization -> [-1, 1]
+                max_d = d2term.max()
+                min_d = d2term.min()
+                mid_d = (max_d + min_d) / 2
+                d2term_normed = (d2term - mid_d) / (max_d - mid_d + 1e-5)
+                d2term_normed = d2term_normed.double()
 
-            # Sinkhorn iteration 概率均衡化
-            d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
-            B = d2term_standard.shape[0]
-            K = d2term_standard.shape[1] 
-            d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
+                # Sinkhorn iteration 概率均衡化
+                d2term_standard = torch.exp(-d2term_normed / self.sinkhorn_epsilon)
+                B = d2term_standard.shape[0]
+                K = d2term_standard.shape[1] 
+                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True).sum(dim=0, keepdim=True))
 
-            for _ in range(self.sinkhorn_iter):
-                # row normalization
-                d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True) + 1e-8)
-                d2term_standard /= B
+                for _ in range(self.sinkhorn_iter):
+                    # row normalization
+                    d2term_standard = d2term_standard / (d2term_standard.sum(dim=1, keepdim=True))
+                    d2term_standard /= B
 
-                # column normalization
-                d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True) + 1e-8)
-                d2term_standard /= K
-            
-            d2term_standard *= B
+                    # column normalization
+                    d2term_standard = d2term_standard / (d2term_standard.sum(dim=0, keepdim=True))
+                    d2term_standard /= K
+                
+                d2term_standard *= B
 
-            probs = d2term_standard # [batch_size, codebook_size]
-            indices = torch.argmax(probs, dim=-1) # [batch_size]
-        
+                probs = d2term_standard # [batch_size, codebook_size]
+                indices = torch.argmax(probs, dim=-1) # [batch_size]
+            else:
+                probs = F.softmax(-d2term, dim=-1)
+                indices = torch.multinomial(probs, 1) 
         else:
             probs = F.softmax(-d2term, dim=-1)
-            indices = torch.argmax(-d2term, dim=-1)
+            indices = torch.argmin(d2term, dim=-1)
 
         quant_hard = self.codebook(indices) # [N, codebook_dim]
         quant_soft = (quant_hard - x).detach() + x # [N, codebook_dim]
@@ -293,19 +301,20 @@ class ResidualVectorQuantier(nn.Module):
             for codebook_size_i, sinkhorn_epsilon_i in zip(self.codebook_sizes, self.sinkhorn_epsilons)
         )
 
-
     def kmeans_init(self, x):
         # x: [N, codebook_dim]
         residual = x
-        for codebook_i in self.codebooks:
-            x_q = codebook_i.kmeans_init(residual)
+        for idx, codebook_i in enumerate(self.codebooks):
+            if idx == len(self.codebooks) - 1:
+                x_q = codebook_i.kmeans_init(residual, True)
+            else:
+                x_q = codebook_i.kmeans_init(residual, False)
             residual = residual - x_q
 
     def update_labels(self):
         for codebook_i in self.codebooks:
             codebook_i.update_labels()
 
-    
     def forward(self, x):
         # x [N, codebook_dim]
         residual = x
@@ -314,8 +323,11 @@ class ResidualVectorQuantier(nn.Module):
         indices_list = []
         probs_list = []
         loss_list = []
-        for codebook_i in self.codebooks:
-            quant_hard_i, quant_soft_i, indices_i, probs_i, loss_i = codebook_i(residual)
+        for idx, codebook_i in enumerate(self.codebooks):
+            if idx == len(self.codebooks) - 1:
+                quant_hard_i, quant_soft_i, indices_i, probs_i, loss_i = codebook_i(residual, True)  
+            else:   
+                quant_hard_i, quant_soft_i, indices_i, probs_i, loss_i = codebook_i(residual, False)
             indices_list.append(indices_i)
             probs_list.append(probs_i)
             loss_list.append(loss_i)
@@ -337,8 +349,11 @@ class ResidualVectorQuantier(nn.Module):
         quant_soft = 0
         indices_list = []
         probs_list = []
-        for codebook_i in self.codebooks:
-            quant_hard_i, quant_soft_i, indices_i, probs_i = codebook_i.inference(residual)
+        for idx, codebook_i in enumerate(self.codebooks):
+            if idx == len(self.codebooks) - 1:
+                quant_hard_i, quant_soft_i, indices_i, probs_i = codebook_i.inference(residual, True)
+            else:
+                quant_hard_i, quant_soft_i, indices_i, probs_i = codebook_i.inference(residual, False)
             indices_list.append(indices_i)
             probs_list.append(probs_i)
             residual = residual - quant_soft_i
@@ -350,6 +365,19 @@ class ResidualVectorQuantier(nn.Module):
 
         return quant_hard, quant_soft, indices, probs
 
+    @torch.no_grad()
+    def generate_indices(self, x):
+        # x [N, codebook_dim]
+        residual = x
+        indices_list = []
+        for codebook_i in self.codebooks:
+            _, quant_soft_i, indices_i, _ = codebook_i.inference(residual, False)
+            indices_list.append(indices_i)
+            residual = residual - quant_soft_i
+        
+        indices = torch.stack(indices_list, dim=-1) # [N, codebook_num]
+
+        return indices
 
 
 class RQVAE(nn.Module):
@@ -421,11 +449,18 @@ class RQVAE(nn.Module):
         self.item_emb.weight.requires_grad = False
 
         if self.cf_loss_open:
-            self.cf_emb_data = torch.load(cf_emb_path)
+            self.cf_emb_data = torch.cat(
+                [
+                    torch.zeros((1, self.in_dims[-1]), dtype=torch.long),
+                    torch.load(cf_emb_path)
+                ],
+                dim=0
+            )
             self.cf_emb = nn.Embedding(self.cf_emb_data.shape[0], self.in_dims[-1], padding_idx=self.padding_idx)
             self.cf_emb.weight.data.copy_(self.cf_emb_data.clone().detach().to(torch.float32))
             self.cf_emb.weight.requires_grad = False
 
+            assert self.item_emb.weight.shape[0] == self.cf_emb.weight.shape[0], "cf emb or llm emb have wrong shape"
 
         self.item_indices = None
 
@@ -439,18 +474,17 @@ class RQVAE(nn.Module):
         self.rq.update_labels()
 
     @torch.no_grad()
-    def compute_unique_key_ratio(self):
-        x_in = self.encoder(self.item_emb.weight) # [N, in_dims[-1]]
-        _, _, item_indices, _ = self.rq.inference(x_in)
-        item_indices = item_indices.cpu().numpy()
+    def compute_collision_ratio(self):
+        x_in = self.encoder(self.item_emb.weight[1:]) # [N, in_dims[-1]]
+        item_indices = self.rq.generate_indices(x_in).cpu().numpy()
         inverse_map = defaultdict(list)
         for i, indices in enumerate(item_indices):
             key = ",".join(map(str, indices))
             inverse_map[key].append(i)
         print(
-            f"Unique key number: {len(inverse_map)}, ratio: {len(inverse_map)/(len(item_indices))}."
+            f"Unique key number: {len(inverse_map)}, collision ratio: {(len(item_indices) - len(inverse_map))/len(item_indices)}."
         )
-        return len(inverse_map)/(len(item_indices))
+        return (len(item_indices) - len(inverse_map))/len(item_indices)
 
     @torch.no_grad()
     def get_all_indices(self):
@@ -463,7 +497,7 @@ class RQVAE(nn.Module):
             for i, indexstr in enumerate(all_indices_str):
                 if indexstr not in indexstr2id:
                     indexstr2id[indexstr] = []
-                indexstr2id[indexstr].append(i + 1)
+                indexstr2id[indexstr].append(i)
 
             collision_item_groups = []
 
@@ -475,18 +509,20 @@ class RQVAE(nn.Module):
 
 
 
-        x_in = self.encoder(self.item_emb.weight)
-        _, _, item_indices, _ = self.rq.inference(x_in)
-        item_indices = item_indices.cpu().numpy() # [N, codebook_num]
+        x_in = self.encoder(self.item_emb.weight[1:])
+        item_indices = self.rq.generate_indices(x_in).cpu().numpy() # [N, codebook_num]
         prefix = ["<a_{}>","<b_{}>","<c_{}>","<d_{}>","<e_{}>","<f_{}>"]
         item_indices_str = []
-        for i, indices in enumerate(item_indices):
+        for indices in item_indices:
             item_indices_str.append(",".join([prefix[j].format(indices[j]) for j in range(len(indices))]))
         
         sinkhorn_open = self.sinkhorn_open
         sinkhorn_epsilons = self.sinkhorn_epsilons
 
+        self.sinkhorn_open = True
         self.sinkhorn_epsilons = [0.0, 0.0, 0.0, 0.003]
+        self.rq.sinkhorn_open = True
+        self.rq.sinkhorn_epsilons = [0.0, 0.0, 0.0, 0.003]
         for i, vq in  enumerate(self.rq.codebooks):
             vq.sinkhorn_open = True
             vq.sinkhorn_epsilon = self.sinkhorn_epsilons[i]
@@ -495,22 +531,30 @@ class RQVAE(nn.Module):
         while iter_num > 0 and len(item_indices) != len(set(item_indices_str)):
             collision_item_groups = get_collision_item(item_indices_str)
             for collision_group in collision_item_groups:
-                _, _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device))
+                _, _, new_indices, _ = self.inference(torch.tensor(collision_group, dtype=torch.long, device=x_in.device) + 1)
                 new_indices = new_indices.cpu().numpy()
                 for i, new_index in enumerate(new_indices):
-                    item_indices_str[collision_group[i] - 1] = ",".join([prefix[j].format(new_index[j]) for j in range(len(new_index))])
-                    item_indices[collision_group[i] - 1] = new_index
+                    item_indices_str[collision_group[i]] = ",".join([prefix[j].format(new_index[j]) for j in range(len(new_index))])
+                    item_indices[collision_group[i]] = new_index
             iter_num -= 1
         
+        self.sinkhorn_open = sinkhorn_open
         self.sinkhorn_epsilons = sinkhorn_epsilons
+        self.rq.sinkhorn_open = sinkhorn_open
+        self.rq.sinkhorn_epsilons = sinkhorn_epsilons
         for i, vq in  enumerate(self.rq.codebooks):
             vq.sinkhorn_open = sinkhorn_open
             vq.sinkhorn_epsilon = sinkhorn_epsilons[i]
         
-        self.item_indices = torch.tensor(item_indices, dtype=torch.long, device=x_in.device)
+        self.item_indices = torch.cat(
+            [
+                torch.zeros((1, 4), dtype=torch.long, device=x_in.device),
+                torch.tensor(item_indices, dtype=torch.long, device=x_in.device)
+            ]
+        )
         
         print(
-            f"Unique key number: {len(set(item_indices_str))}, ratio: {len(set(item_indices_str))/(len(item_indices) - 1)}."
+            f"Unique key number: {len(set(item_indices_str))}, collision ratio: {(len(item_indices) - len(set(item_indices_str)))/len(item_indices)}."
         )
 
     def forward(self, x):
